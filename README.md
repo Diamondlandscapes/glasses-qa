@@ -47,7 +47,7 @@ Settings has a picker with two options. **xAI Grok** is the default. **Google Ge
 
 A 429 from either provider skips that frame, shows a short status, and does not speak the error.
 
-While **Start** is running, the next photo begins as soon as the previous answer returns, after the minimum gap. Every numbered question in the frame is answered in one short spoken list. Identical answers are not spoken again. If only some numbers changed, only those are spoken. The screen shows the measured model round trip.
+While **Start** is running, the next photo begins as soon as the previous answer returns, after the minimum gap. Each question is spoken as its own sentence, for example “Question 1: B, photosynthesis.” Speech already in progress is not cut off. A question number is spoken once unless its answer changes. The same list is shown on screen, along with the measured model round trip.
 
 ## Build
 

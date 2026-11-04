@@ -21,9 +21,15 @@ enum VisionPrompt {
     static let text = """
     Answer every question visible in this image, in order. Questions may be printed, handwritten, or on a screen.
 
-    Reply with plain text only, one short answer per question, prefixed by the number shown on the question. No explanations. Example:
-    1: B. 2: True. 3: 42.
+    For each question, one line of plain text and nothing else:
+    Question N: <the choice letter if it is multiple choice>, <the answer in a few words>
 
+    Examples:
+    Question 1: B, photosynthesis.
+    Question 2: True.
+    Question 3: 42.
+
+    Always include the answer itself, not only a letter. No explanations.
     If there are no questions, reply with exactly:
     NONE
     """
@@ -61,7 +67,7 @@ enum GeminiVision {
             ],
             generationConfig: Request.GenerationConfig(
                 temperature: 0,
-                maxOutputTokens: 120,
+                maxOutputTokens: 220,
                 thinkingConfig: Request.ThinkingConfig(thinkingBudget: 0)
             )
         )

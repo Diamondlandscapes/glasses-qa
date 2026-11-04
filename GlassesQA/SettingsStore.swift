@@ -111,10 +111,11 @@ final class SettingsStore {
         if defaults.object(forKey: Keys.rate) != nil {
             storedRate = defaults.double(forKey: Keys.rate)
         } else {
-            storedRate = 0.56
+            storedRate = SpeechRate.normal
         }
-        let migratedRate = abs(storedRate - 0.5) < 0.001 ? 0.56 : storedRate
-        let resolvedRate = min(0.7, max(0.4, migratedRate))
+        let previousFastDefault = abs(storedRate - 0.5) < 0.001 || abs(storedRate - 0.56) < 0.001
+        let migratedRate = previousFastDefault ? SpeechRate.normal : storedRate
+        let resolvedRate = min(0.65, max(0.3, migratedRate))
 
         let loadedGrok = KeychainStore.load(account: KeychainStore.grokAccount) ?? ""
         let loadedGemini = KeychainStore.load(account: KeychainStore.geminiAccount) ?? ""
@@ -145,7 +146,7 @@ final class SettingsStore {
         if geminiModel != resolvedGemini {
             geminiModel = resolvedGemini
         }
-        let clampedRate = min(0.7, max(0.4, speechRate))
+        let clampedRate = min(0.65, max(0.3, speechRate))
         if speechRate != clampedRate {
             speechRate = clampedRate
         }

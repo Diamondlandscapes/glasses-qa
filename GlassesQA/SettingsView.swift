@@ -93,8 +93,11 @@ struct SettingsView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("Speech speed")
                         Text(rateLabel)
-                        Slider(value: $store.speechRate, in: 0.4...0.7)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Slider(value: $store.speechRate, in: 0.3...0.65)
                             .onChange(of: store.speechRate) { _, _ in
                                 store.persistPreferences()
                             }
@@ -103,9 +106,9 @@ struct SettingsView: View {
                         playSample()
                     }
                 } header: {
-                    Text("Speech")
+                    Text("Speech speed")
                 } footer: {
-                    Text("Answers use the current audio route. When the glasses are the Bluetooth headset, you hear them there.")
+                    Text("Default is a little slower than the system voice. Each answer is spoken separately, with a short pause. Answers use the current audio route, including the glasses.")
                 }
             }
             .navigationTitle("Settings")
@@ -134,9 +137,10 @@ struct SettingsView: View {
     }
 
     private var rateLabel: String {
-        if store.speechRate < 0.5 { return "Slower" }
-        if store.speechRate > 0.62 { return "Faster" }
-        return "Normal speed"
+        let normal = SpeechRate.normal
+        if store.speechRate < normal - 0.04 { return "Slower" }
+        if store.speechRate > normal + 0.04 { return "Faster" }
+        return "Slightly slower than normal"
     }
 
     private func keySection(

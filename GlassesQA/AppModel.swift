@@ -20,6 +20,7 @@ final class AppModel {
     var lastPhotoAt: Date?
     var question = ""
     var answer = ""
+    var answers: [NumberedAnswer] = []
     var roundTrip: TimeInterval?
     var captureModeLabel = "Camera off"
     var needsFirmwareUpdate = false
@@ -253,7 +254,11 @@ final class AppModel {
     }
 
     func playSample() {
-        speaker.speak("This is how answers will sound.", rate: settings.speechRate)
+        speaker.stop()
+        speaker.enqueue(
+            [SpeechItem(number: "sample", key: "sample", text: "This is how answers will sound.")],
+            rate: settings.speechRate
+        )
     }
 
     func updateFirmware() {
@@ -475,17 +480,27 @@ final class AppModel {
                 return
             }
             question = ""
+            answers = turn.items
             answer = turn.display
             let fresh = QuestionParser.freshItems(previous: lastSpoken, current: turn.items)
-            lastSpoken = QuestionParser.spokenKeys(turn.items)
             guard !fresh.isEmpty else {
                 status = "Same answers, skipped"
                 return
             }
+            for item in fresh {
+                lastSpoken[item.number] = QuestionParser.normalize(item.text)
+            }
             status = "Speaking"
-            let spoken = QuestionParser.speakable(fresh)
-            let clipped = spoken.count > 500 ? String(spoken.prefix(500)) : spoken
-            speaker.speak(clipped, rate: settings.speechRate)
+            speaker.enqueue(
+                fresh.map {
+                    SpeechItem(
+                        number: $0.number,
+                        key: QuestionParser.normalize($0.text),
+                        text: QuestionParser.spokenLine($0)
+                    )
+                },
+                rate: settings.speechRate
+            )
         } catch is CancellationError {
             return
         } catch CaptureError.stopped {

@@ -154,25 +154,20 @@ struct ContentView: View {
 
     private var answerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !model.question.isEmpty && model.question != model.answer {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Question")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(model.question)
-                        .font(.body)
+            Text("Answers")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if model.answers.isEmpty {
+                Text("Point the glasses at a question, then start.")
+                    .font(.title3)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(model.answers) { item in
+                    Text(QuestionParser.spokenLine(item))
+                        .font(.title3)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Answer")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(model.answer.isEmpty ? "Point the glasses at a question, then start." : model.answer)
-                    .font(.title3)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -1,8 +1,9 @@
 import Foundation
 
-struct NumberedAnswer: Equatable {
+struct NumberedAnswer: Equatable, Identifiable {
     var number: String
     var text: String
+    var id: String { number }
 }
 
 struct AnswerSet: Equatable {
@@ -21,7 +22,7 @@ enum QuestionParser {
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if isNone(text) { return nil }
 
-        let numbered = numberedItems(text)
+        let numbered = unique(numberedItems(text))
         if !numbered.isEmpty {
             return AnswerSet(items: numbered)
         }
@@ -44,17 +45,17 @@ enum QuestionParser {
         return keys
     }
 
-    static func speakable(_ items: [NumberedAnswer]) -> String {
-        items.map { item in
-            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.isEmpty { return "" }
-            if let last = text.last, ".!?".contains(last) {
-                return "\(item.number): \(text)"
-            }
-            return "\(item.number): \(text)."
+    static func spokenLine(_ item: NumberedAnswer) -> String {
+        let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+        if let last = text.last, ".!?".contains(last) {
+            return "Question \(item.number): \(text)"
         }
-        .filter { !$0.isEmpty }
-        .joined(separator: " ")
+        return "Question \(item.number): \(text)."
+    }
+
+    static func speakable(_ items: [NumberedAnswer]) -> String {
+        items.map(spokenLine).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     static func normalize(_ text: String) -> String {
@@ -67,8 +68,20 @@ enum QuestionParser {
         )
     }
 
+    private static func unique(_ items: [NumberedAnswer]) -> [NumberedAnswer] {
+        var order: [String] = []
+        var byNumber: [String: NumberedAnswer] = [:]
+        for item in items {
+            if byNumber[item.number] == nil {
+                order.append(item.number)
+            }
+            byNumber[item.number] = item
+        }
+        return order.compactMap { byNumber[$0] }
+    }
+
     private static func numberedItems(_ text: String) -> [NumberedAnswer] {
-        let pattern = #"(\d+)\s*[:.)]\s*(.+?)(?=\s+\d+\s*[:.)]|\s*$)"#
+        let pattern = #"(?:Question\s+)?(\d+)\s*[:.)]\s*(.+?)(?=\s*(?:Question\s+)?\d+\s*[:.)]|\s*$)"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
             return []
         }
