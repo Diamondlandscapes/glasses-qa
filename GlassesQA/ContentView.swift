@@ -34,7 +34,8 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                     controlButton
-                    Text("Every \(Int(model.settings.captureInterval)) seconds · \(model.captureModeLabel)")
+                    snapButton
+                    Text("Min gap \(Int(model.settings.minGap)) s · \(model.captureModeLabel) · \(model.latencyLabel)")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
@@ -207,6 +208,19 @@ struct ContentView: View {
         .accessibilityLabel(model.running ? "Stop" : "Start")
     }
 
+    private var snapButton: some View {
+        Button {
+            model.snapNow()
+        } label: {
+            Label("Snap now", systemImage: "camera.fill")
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .disabled(snapDisabled)
+    }
+
     private var connectTitle: String {
         switch model.registrationState {
         case .registered:
@@ -220,6 +234,13 @@ struct ContentView: View {
 
     private var controlTitle: String {
         model.running || model.isStarting ? "Stop" : "Start"
+    }
+
+    private var snapDisabled: Bool {
+        !model.sdkReady
+            || model.registrationState != .registered
+            || !model.settings.hasAPIKey
+            || model.isStarting
     }
 
     private var controlDisabled: Bool {

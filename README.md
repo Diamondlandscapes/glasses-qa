@@ -40,14 +40,14 @@ After the first sideload, iOS shows **Settings → Privacy & Security → Develo
 
 Settings has a picker with two options. **xAI Grok** is the default. **Google Gemini** is the other. Each provider has its own key in the Keychain.
 
-1. For Grok, create a key at [console.x.ai](https://console.x.ai). The default model is `grok-4.7`, the current xAI chat model that accepts images. `grok-4-fast` is not on the public API.
-2. For Gemini, create a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). The default model is `gemini-2.5-flash`. The free tier allows about 10 requests a minute.
+1. For Grok, create a key at [console.x.ai](https://console.x.ai). The default model is `grok-4.20-0309-non-reasoning`, the fastest public Grok model that accepts images. It does not spend tokens on reasoning. `grok-4.7` always reasons; if you select it, the app sets reasoning effort to low.
+2. For Gemini, create a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). The default model is `gemini-2.5-flash-lite`. The free tier allows about 10 requests a minute.
 3. In the app, tap the gear icon, paste the key for the provider you want, and tap **Save key**.
-4. The same screen sets the capture interval (2–10 seconds, default 5), the model name for the selected provider, and the speech rate. **Play a sample** checks that you can hear speech on the current route.
+4. The same screen sets the minimum gap after an answer (1–10 seconds, default 1), the model name for the selected provider, and the speech rate. **Play a sample** checks that you can hear speech on the current route. **Snap now** takes one photo immediately.
 
 A 429 from either provider skips that frame, shows a short status, and does not speak the error.
 
-While **Start** is running, the app takes one photo at a time. If a frame has a clear question, it speaks a one or two sentence answer and shows the photo, the question, and the answer. It stays quiet when the model says there is no question, and it does not repeat the last question it already answered.
+While **Start** is running, the next photo begins as soon as the previous answer returns, after the minimum gap. Every numbered question in the frame is answered in one short spoken list. Identical answers are not spoken again. If only some numbers changed, only those are spoken. The screen shows the measured model round trip.
 
 ## Build
 

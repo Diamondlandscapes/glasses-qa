@@ -1,70 +1,94 @@
 import Foundation
 
-struct VisionTurn: Equatable {
-    var question: String
-    var answer: String
+struct NumberedAnswer: Equatable {
+    var number: String
+    var text: String
+}
+
+struct AnswerSet: Equatable {
+    var items: [NumberedAnswer]
+
+    var display: String {
+        QuestionParser.speakable(items)
+    }
 }
 
 enum QuestionParser {
-    static func parse(_ raw: String) -> VisionTurn? {
+    static func parse(_ raw: String) -> AnswerSet? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         text = text.replacingOccurrences(of: "```", with: "")
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if isNone(text) { return nil }
 
-        let lines = text.components(separatedBy: .newlines)
-        var question: String?
-        var answerParts: [String] = []
-        var inAnswer = false
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            if hasPrefix(trimmed, "QUESTION:") {
-                question = String(trimmed.dropFirst("QUESTION:".count))
-                    .trimmingCharacters(in: .whitespaces)
-                inAnswer = false
-                continue
-            }
-            if hasPrefix(trimmed, "ANSWER:") {
-                let value = String(trimmed.dropFirst("ANSWER:".count))
-                    .trimmingCharacters(in: .whitespaces)
-                answerParts = value.isEmpty ? [] : [value]
-                inAnswer = true
-                continue
-            }
-            if inAnswer {
-                answerParts.append(trimmed)
-            }
+        let numbered = numberedItems(text)
+        if !numbered.isEmpty {
+            return AnswerSet(items: numbered)
         }
-
-        let answer = answerParts.joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let question {
-            let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmedQuestion.isEmpty || isNone(trimmedQuestion) || answer.isEmpty || isNone(answer) {
-                return nil
-            }
-            return VisionTurn(question: trimmedQuestion, answer: answer)
-        }
-
-        return VisionTurn(question: text, answer: text)
+        if isNone(text) { return nil }
+        return AnswerSet(items: [NumberedAnswer(number: "1", text: stripTrailingPeriod(text))])
     }
 
-    static func normalize(_ question: String) -> String {
-        let collapsed = question
+    /// Answers whose number is new or whose text changed since the last spoken set.
+    static func freshItems(previous: [String: String], current: [NumberedAnswer]) -> [NumberedAnswer] {
+        current.filter { item in
+            previous[item.number] != normalize(item.text)
+        }
+    }
+
+    static func spokenKeys(_ items: [NumberedAnswer]) -> [String: String] {
+        var keys: [String: String] = [:]
+        for item in items {
+            keys[item.number] = normalize(item.text)
+        }
+        return keys
+    }
+
+    static func speakable(_ items: [NumberedAnswer]) -> String {
+        items.map { item in
+            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { return "" }
+            if let last = text.last, ".!?".contains(last) {
+                return "\(item.number): \(text)"
+            }
+            return "\(item.number): \(text)."
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+    }
+
+    static func normalize(_ text: String) -> String {
+        let collapsed = text
             .lowercased()
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
-        let trimmed = collapsed.trimmingCharacters(
+        return collapsed.trimmingCharacters(
             in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines)
         )
-        return trimmed
     }
 
-    private static func hasPrefix(_ text: String, _ prefix: String) -> Bool {
-        text.uppercased().hasPrefix(prefix)
+    private static func numberedItems(_ text: String) -> [NumberedAnswer] {
+        let pattern = #"(\d+)\s*[:.)]\s*(.+?)(?=\s+\d+\s*[:.)]|\s*$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
+            return []
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, options: [], range: range).compactMap { match in
+            guard let numberRange = Range(match.range(at: 1), in: text),
+                  let textRange = Range(match.range(at: 2), in: text) else { return nil }
+            let number = String(text[numberRange])
+            let body = stripTrailingPeriod(String(text[textRange]))
+            guard !body.isEmpty, !isNone(body) else { return nil }
+            return NumberedAnswer(number: number, text: body)
+        }
+    }
+
+    private static func stripTrailingPeriod(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasSuffix(".") {
+            text.removeLast()
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func isNone(_ text: String) -> Bool {
@@ -83,7 +107,7 @@ enum QuestionParser {
             return true
         }
         let first = upper.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
-        if (first == "NONE" || first == "NONE." || first == "NONE:") && !upper.contains("QUESTION:") {
+        if (first == "NONE" || first == "NONE." || first == "NONE:") && !upper.contains(":") {
             return true
         }
         return false

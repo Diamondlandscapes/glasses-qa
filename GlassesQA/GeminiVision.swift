@@ -19,15 +19,29 @@ enum VisionError: LocalizedError {
 
 enum VisionPrompt {
     static let text = """
-    Read any question visible in this image. The question may be printed, handwritten, or on a screen.
+    Answer every question visible in this image, in order. Questions may be printed, handwritten, or on a screen.
 
-    If there is a clear question, reply in exactly this form and nothing else:
-    QUESTION: <the question on one line>
-    ANSWER: <a short direct answer, 1-2 sentences>
+    Reply with plain text only, one short answer per question, prefixed by the number shown on the question. No explanations. Example:
+    1: B. 2: True. 3: 42.
 
-    If there is no clear question, reply with exactly:
+    If there are no questions, reply with exactly:
     NONE
     """
+}
+
+enum VisionHTTP {
+    /// One session so TLS and the HTTP connection stay warm between photos.
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.httpMaximumConnectionsPerHost = 2
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 25
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        config.httpShouldSetCookies = false
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
 }
 
 enum GeminiVision {
@@ -44,7 +58,12 @@ enum GeminiVision {
                     .text(VisionPrompt.text),
                     .image(jpeg)
                 ])
-            ]
+            ],
+            generationConfig: Request.GenerationConfig(
+                temperature: 0,
+                maxOutputTokens: 120,
+                thinkingConfig: Request.ThinkingConfig(thinkingBudget: 0)
+            )
         )
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -53,7 +72,7 @@ enum GeminiVision {
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await VisionHTTP.session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 429 {
             throw VisionError.rateLimited
@@ -72,6 +91,7 @@ enum GeminiVision {
             .first?
             .content?
             .parts?
+            .filter { $0.thought != true }
             .compactMap(\.text)
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -118,7 +138,24 @@ private struct Request: Encodable {
         }
     }
 
+    struct GenerationConfig: Encodable {
+        let temperature: Double
+        let maxOutputTokens: Int
+        let thinkingConfig: ThinkingConfig
+
+        enum CodingKeys: String, CodingKey {
+            case temperature
+            case maxOutputTokens
+            case thinkingConfig
+        }
+    }
+
+    struct ThinkingConfig: Encodable {
+        let thinkingBudget: Int
+    }
+
     let contents: [Content]
+    let generationConfig: GenerationConfig
 }
 
 private struct Response: Decodable {
@@ -126,6 +163,7 @@ private struct Response: Decodable {
         struct Content: Decodable {
             struct Part: Decodable {
                 let text: String?
+                let thought: Bool?
             }
 
             let parts: [Part]?

@@ -79,22 +79,22 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Stepper(value: $store.intervalSeconds, in: 2...10, step: 1) {
-                        Text("Every \(Int(store.captureInterval)) seconds")
+                    Stepper(value: $store.minGapSeconds, in: 1...10, step: 1) {
+                        Text(store.minGap == 1 ? "At least 1 second" : "At least \(Int(store.minGap)) seconds")
                     }
-                    .onChange(of: store.intervalSeconds) { _, _ in
+                    .onChange(of: store.minGapSeconds) { _, _ in
                         store.persistPreferences()
                     }
                 } header: {
-                    Text("Capture interval")
+                    Text("Minimum gap")
                 } footer: {
-                    Text("A new photo starts only after the previous one finishes, and at least this many seconds after it began.")
+                    Text("The next photo starts this long after the previous answer returns. Snap now skips the wait.")
                 }
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(rateLabel)
-                        Slider(value: $store.speechRate, in: 0.35...0.6)
+                        Slider(value: $store.speechRate, in: 0.4...0.7)
                             .onChange(of: store.speechRate) { _, _ in
                                 store.persistPreferences()
                             }
@@ -127,15 +127,15 @@ struct SettingsView: View {
     private var modelFooter: String {
         switch store.provider {
         case .grok:
-            return "Default is grok-4.7. It accepts images on the xAI API."
+            return "Default is grok-4.20-0309-non-reasoning, the fastest public Grok model that accepts images. It does not reason. If you switch to grok-4.7, reasoning is set to low."
         case .gemini:
-            return "Default is gemini-2.5-flash. The free tier allows about 10 requests a minute."
+            return "Default is gemini-2.5-flash-lite. Thinking is off. The free tier allows about 10 requests a minute."
         }
     }
 
     private var rateLabel: String {
-        if store.speechRate < 0.45 { return "Slower" }
-        if store.speechRate > 0.54 { return "Faster" }
+        if store.speechRate < 0.5 { return "Slower" }
+        if store.speechRate > 0.62 { return "Faster" }
         return "Normal speed"
     }
 

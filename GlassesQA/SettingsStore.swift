@@ -19,9 +19,9 @@ enum VisionProvider: String, CaseIterable, Identifiable {
     var defaultModel: String {
         switch self {
         case .grok:
-            return "grok-4.7"
+            return "grok-4.20-0309-non-reasoning"
         case .gemini:
-            return "gemini-2.5-flash"
+            return "gemini-2.5-flash-lite"
         }
     }
 }
@@ -31,14 +31,14 @@ enum VisionProvider: String, CaseIterable, Identifiable {
 final class SettingsStore {
     private enum Keys {
         static let provider = "glassesqa.provider"
-        static let interval = "glassesqa.interval"
+        static let minGap = "glassesqa.minGap"
         static let grokModel = "glassesqa.grokModel"
         static let geminiModel = "glassesqa.geminiModel"
         static let rate = "glassesqa.rate"
     }
 
     var provider: VisionProvider
-    var intervalSeconds: Double
+    var minGapSeconds: Double
     var grokModel: String
     var geminiModel: String
     var speechRate: Double
@@ -47,8 +47,8 @@ final class SettingsStore {
     private(set) var hasGrokAPIKey: Bool
     private(set) var hasGeminiAPIKey: Bool
 
-    var captureInterval: TimeInterval {
-        min(10, max(2, intervalSeconds.rounded()))
+    var minGap: TimeInterval {
+        min(10, max(1, minGapSeconds.rounded()))
     }
 
     var apiKey: String {
@@ -87,35 +87,40 @@ final class SettingsStore {
         let defaults = UserDefaults.standard
         let resolvedProvider = VisionProvider(rawValue: defaults.string(forKey: Keys.provider) ?? "") ?? .grok
 
-        let storedInterval: Double
-        if defaults.object(forKey: Keys.interval) != nil {
-            storedInterval = defaults.double(forKey: Keys.interval)
+        let storedGap: Double
+        if defaults.object(forKey: Keys.minGap) != nil {
+            storedGap = defaults.double(forKey: Keys.minGap)
         } else {
-            storedInterval = 5
+            storedGap = 1
         }
-        let resolvedInterval = min(10, max(2, storedInterval.rounded()))
+        let resolvedGap = min(10, max(1, storedGap.rounded()))
 
         let storedGrok = defaults.string(forKey: Keys.grokModel)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let resolvedGrok = storedGrok.isEmpty ? VisionProvider.grok.defaultModel : storedGrok
+        let resolvedGrok = (storedGrok.isEmpty || storedGrok == "grok-4.7")
+            ? VisionProvider.grok.defaultModel
+            : storedGrok
 
         let storedGemini = defaults.string(forKey: Keys.geminiModel)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let resolvedGemini = storedGemini.isEmpty ? VisionProvider.gemini.defaultModel : storedGemini
+        let resolvedGemini = (storedGemini.isEmpty || storedGemini == "gemini-2.5-flash")
+            ? VisionProvider.gemini.defaultModel
+            : storedGemini
 
         let storedRate: Double
         if defaults.object(forKey: Keys.rate) != nil {
             storedRate = defaults.double(forKey: Keys.rate)
         } else {
-            storedRate = 0.5
+            storedRate = 0.56
         }
-        let resolvedRate = min(0.6, max(0.35, storedRate))
+        let migratedRate = abs(storedRate - 0.5) < 0.001 ? 0.56 : storedRate
+        let resolvedRate = min(0.7, max(0.4, migratedRate))
 
         let loadedGrok = KeychainStore.load(account: KeychainStore.grokAccount) ?? ""
         let loadedGemini = KeychainStore.load(account: KeychainStore.geminiAccount) ?? ""
 
         provider = resolvedProvider
-        intervalSeconds = resolvedInterval
+        minGapSeconds = resolvedGap
         grokModel = resolvedGrok
         geminiModel = resolvedGemini
         speechRate = resolvedRate
@@ -126,9 +131,9 @@ final class SettingsStore {
     }
 
     func persistPreferences() {
-        let clampedInterval = min(10, max(2, intervalSeconds.rounded()))
-        if intervalSeconds != clampedInterval {
-            intervalSeconds = clampedInterval
+        let clampedGap = min(10, max(1, minGapSeconds.rounded()))
+        if minGapSeconds != clampedGap {
+            minGapSeconds = clampedGap
         }
         let trimmedGrok = grokModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedGrok = trimmedGrok.isEmpty ? VisionProvider.grok.defaultModel : trimmedGrok
@@ -140,14 +145,14 @@ final class SettingsStore {
         if geminiModel != resolvedGemini {
             geminiModel = resolvedGemini
         }
-        let clampedRate = min(0.6, max(0.35, speechRate))
+        let clampedRate = min(0.7, max(0.4, speechRate))
         if speechRate != clampedRate {
             speechRate = clampedRate
         }
 
         let defaults = UserDefaults.standard
         defaults.set(provider.rawValue, forKey: Keys.provider)
-        defaults.set(intervalSeconds, forKey: Keys.interval)
+        defaults.set(minGapSeconds, forKey: Keys.minGap)
         defaults.set(grokModel, forKey: Keys.grokModel)
         defaults.set(geminiModel, forKey: Keys.geminiModel)
         defaults.set(speechRate, forKey: Keys.rate)

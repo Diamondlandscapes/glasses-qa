@@ -20,6 +20,7 @@ final class AppModel {
     var lastPhotoAt: Date?
     var question = ""
     var answer = ""
+    var roundTrip: TimeInterval?
     var captureModeLabel = "Camera off"
     var needsFirmwareUpdate = false
     var needsGlassesAppUpdate = false
@@ -33,7 +34,9 @@ final class AppModel {
     @ObservationIgnored private var deviceTask: Task<Void, Never>?
     @ObservationIgnored private var loopTask: Task<Void, Never>?
     @ObservationIgnored private var compatibilityTokens: [DeviceIdentifier: AnyListenerToken] = [:]
-    @ObservationIgnored private var lastAnsweredKey = ""
+    @ObservationIgnored private var lastSpoken: [String: String] = [:]
+    @ObservationIgnored private var snapRequested = false
+    @ObservationIgnored private var oneShot = false
     @ObservationIgnored private var consecutiveCaptureFailures = 0
     @ObservationIgnored private var startToken = UUID()
     @ObservationIgnored private var cameraAccessGranted = false
@@ -137,6 +140,61 @@ final class AppModel {
         }
     }
 
+    var latencyLabel: String {
+        guard let roundTrip else { return "Round trip —" }
+        return String(format: "Round trip %.1f s", roundTrip)
+    }
+
+    func snapNow() {
+        if running || isStarting {
+            snapRequested = true
+            if running {
+                status = "Snapping…"
+            }
+            return
+        }
+        guard sdkReady, let wearables, let deviceSelector else {
+            lastError = "The glasses SDK didn't start."
+            return
+        }
+        guard registrationState == .registered else {
+            lastError = "Connect the glasses with Meta AI first."
+            return
+        }
+        guard settings.hasAPIKey else {
+            lastError = settings.missingKeyMessage
+            return
+        }
+        oneShot = true
+        isStarting = true
+        lastError = nil
+        let token = UUID()
+        startToken = token
+        status = "Snapping…"
+        Task {
+            do {
+                _ = try await glasses.prepare(wearables: wearables, selector: deviceSelector)
+                guard startToken == token else { return }
+                captureModeLabel = glasses.modeLabel
+                running = true
+                isStarting = false
+                await captureOnce()
+                guard startToken == token else { return }
+                endCapture(statusText: status, keepSpeaking: true)
+            } catch {
+                guard startToken == token else { return }
+                glasses.stop()
+                running = false
+                isStarting = false
+                oneShot = false
+                needsGlassesAppUpdate = glasses.needsGlassesAppUpdate
+                lastError = error.localizedDescription
+                status = "Couldn't snap."
+                log.error("snap failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     func start() {
         guard !running, !isStarting else { return }
         guard sdkReady, let wearables else {
@@ -155,6 +213,7 @@ final class AppModel {
             lastError = "The glasses SDK didn't start."
             return
         }
+        oneShot = false
         isStarting = true
         lastError = nil
         consecutiveCaptureFailures = 0
@@ -169,7 +228,7 @@ final class AppModel {
                 running = true
                 isStarting = false
                 status = mode == .photo
-                    ? "Watching. Next photo on the interval."
+                    ? "Watching. Next photo as soon as the answer returns."
                     : "Photo capture unavailable. Using video frames."
                 loopTask = Task { await self.runLoop() }
             } catch {
@@ -358,19 +417,22 @@ final class AppModel {
     }
 
     private func runLoop() async {
-        while running && !Task.isCancelled {
-            let started = Date()
+        while running && !Task.isCancelled && !oneShot {
             await captureOnce()
-            if !running || Task.isCancelled { break }
-            let remaining = settings.captureInterval - Date().timeIntervalSince(started)
-            if remaining > 0 {
-                let deadline = Date().addingTimeInterval(remaining)
-                while Date() < deadline {
-                    if !running || Task.isCancelled { return }
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                }
-            }
+            if !running || Task.isCancelled || oneShot { break }
+            await waitMinGap()
         }
+    }
+
+    private func waitMinGap() async {
+        let gap = settings.minGap
+        guard gap > 0 else { return }
+        let deadline = Date().addingTimeInterval(gap)
+        while Date() < deadline {
+            if !running || Task.isCancelled || snapRequested { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        snapRequested = false
     }
 
     private func captureOnce() async {
@@ -390,6 +452,7 @@ final class AppModel {
             }
             lastPhotoAt = Date()
             status = "Reading the photo…"
+            let started = Date()
             let text: String
             switch settings.provider {
             case .grok:
@@ -405,22 +468,24 @@ final class AppModel {
                     model: settings.modelName
                 )
             }
+            roundTrip = Date().timeIntervalSince(started)
             guard running else { return }
             guard let turn = QuestionParser.parse(text) else {
                 status = "No question in this photo"
                 return
             }
-            let key = QuestionParser.normalize(turn.question)
-            if !key.isEmpty, key == lastAnsweredKey {
-                status = "Same question, skipped"
+            question = ""
+            answer = turn.display
+            let fresh = QuestionParser.freshItems(previous: lastSpoken, current: turn.items)
+            lastSpoken = QuestionParser.spokenKeys(turn.items)
+            guard !fresh.isEmpty else {
+                status = "Same answers, skipped"
                 return
             }
-            question = turn.question
-            answer = turn.answer
-            lastAnsweredKey = key
             status = "Speaking"
-            let spoken = turn.answer.count > 500 ? String(turn.answer.prefix(500)) : turn.answer
-            speaker.speak(spoken, rate: settings.speechRate)
+            let spoken = QuestionParser.speakable(fresh)
+            let clipped = spoken.count > 500 ? String(spoken.prefix(500)) : spoken
+            speaker.speak(clipped, rate: settings.speechRate)
         } catch is CancellationError {
             return
         } catch CaptureError.stopped {
@@ -457,13 +522,21 @@ final class AppModel {
     }
 
     private func haltLoop(statusText: String) {
+        endCapture(statusText: statusText, keepSpeaking: false)
+    }
+
+    private func endCapture(statusText: String, keepSpeaking: Bool) {
         startToken = UUID()
         running = false
         isStarting = false
+        oneShot = false
+        snapRequested = false
         loopTask?.cancel()
         loopTask = nil
         glasses.stop()
-        speaker.stop()
+        if !keepSpeaking {
+            speaker.stop()
+        }
         captureModeLabel = "Camera off"
         status = statusText
     }

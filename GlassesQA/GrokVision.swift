@@ -4,7 +4,9 @@ enum GrokVision {
     static func answer(jpeg: Data, apiKey: String, model: String) async throws -> String {
         let body = Request(
             model: model,
-            maxTokens: 300,
+            temperature: 0,
+            maxTokens: 120,
+            reasoningEffort: reasoningEffort(for: model),
             messages: [
                 Request.Message(
                     role: "user",
@@ -22,7 +24,7 @@ enum GrokVision {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await VisionHTTP.session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 429 {
             throw VisionError.rateLimited
@@ -41,6 +43,22 @@ enum GrokVision {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !text.isEmpty else { throw VisionError.empty }
         return text
+    }
+
+    /// grok-4.7, 4.6, and 4.5 always reason and default to high effort.
+    /// The non-reasoning model rejects this parameter, so it is omitted there.
+    static func reasoningEffort(for model: String) -> String? {
+        let id = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if id.contains("non-reasoning") || id.contains("nonreasoning") || id.contains("multi-agent") {
+            return nil
+        }
+        if id.hasPrefix("grok-4.7") || id.hasPrefix("grok-4.6") || id.hasPrefix("grok-4.5") {
+            return "low"
+        }
+        if id.hasPrefix("grok-4.3") {
+            return "none"
+        }
+        return nil
     }
 }
 
@@ -82,13 +100,28 @@ private struct Request: Encodable {
     }
 
     let model: String
+    let temperature: Double
     let maxTokens: Int
+    let reasoningEffort: String?
     let messages: [Message]
 
     enum CodingKeys: String, CodingKey {
         case model
+        case temperature
         case messages
         case maxTokens = "max_tokens"
+        case reasoningEffort = "reasoning_effort"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        try container.encode(temperature, forKey: .temperature)
+        try container.encode(maxTokens, forKey: .maxTokens)
+        try container.encode(messages, forKey: .messages)
+        if let reasoningEffort {
+            try container.encode(reasoningEffort, forKey: .reasoningEffort)
+        }
     }
 }
 
