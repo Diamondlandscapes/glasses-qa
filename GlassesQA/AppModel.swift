@@ -27,6 +27,7 @@ final class AppModel {
     @ObservationIgnored private let glasses = GlassesCapture()
     @ObservationIgnored private let speaker = SpeechSpeaker()
     @ObservationIgnored private let wearables: (any WearablesInterface)?
+    @ObservationIgnored private let deviceSelector: AutoDeviceSelector?
     @ObservationIgnored private let log = Logger(subsystem: "com.dustin.glassesqa", category: "app")
     @ObservationIgnored private var registrationTask: Task<Void, Never>?
     @ObservationIgnored private var deviceTask: Task<Void, Never>?
@@ -35,9 +36,13 @@ final class AppModel {
     @ObservationIgnored private var lastAnsweredKey = ""
     @ObservationIgnored private var consecutiveCaptureFailures = 0
     @ObservationIgnored private var startToken = UUID()
+    @ObservationIgnored private var cameraAccessGranted = false
+    @ObservationIgnored private var cameraPermissionAttempted = false
+    @ObservationIgnored private var permissionTask: Task<Void, Never>?
 
     init(wearables: any WearablesInterface) {
         self.wearables = wearables
+        deviceSelector = AutoDeviceSelector(wearables: wearables)
         sdkReady = true
         registrationState = wearables.registrationState
         devices = wearables.devices
@@ -51,16 +56,19 @@ final class AppModel {
             for await devices in wearables.devicesStream() {
                 self.devices = devices
                 self.watchCompatibility(devices)
+                self.refreshCameraPermission()
             }
         }
         watchCompatibility(wearables.devices)
         if registrationState == .registered {
             status = "Registered with Meta AI."
+            refreshCameraPermission()
         }
     }
 
     init(configureError: String) {
         wearables = nil
+        deviceSelector = nil
         sdkReady = false
         lastError = configureError
         status = "The glasses SDK didn't start."
@@ -99,7 +107,7 @@ final class AppModel {
         }
         let battery = device.batteryLevel.map { " · \($0)% battery" } ?? ""
         let extra = devices.count > 1 ? " · +\(devices.count - 1) more" : ""
-        return "\(device.nameOrId()) · \(link)\(battery)\(extra)"
+        return "\(device.nameOrId()) · \(GlassesDeviceReport.typeName(device.deviceType())) · \(link)\(battery)\(extra)"
     }
 
     func connect() {
@@ -143,15 +151,19 @@ final class AppModel {
             lastError = settings.missingKeyMessage
             return
         }
+        guard let deviceSelector else {
+            lastError = "The glasses SDK didn't start."
+            return
+        }
         isStarting = true
         lastError = nil
         consecutiveCaptureFailures = 0
         let token = UUID()
         startToken = token
-        status = "Starting the glasses session…"
+        status = "Checking camera permission…"
         Task {
             do {
-                let mode = try await glasses.prepare(wearables: wearables)
+                let mode = try await glasses.prepare(wearables: wearables, selector: deviceSelector)
                 guard startToken == token else { return }
                 captureModeLabel = glasses.modeLabel
                 running = true
@@ -240,6 +252,10 @@ final class AppModel {
             guard self.status.hasPrefix("Capturing") || self.status.hasPrefix("Receiving") else { return }
             self.status = "Receiving photo \(Int((fraction * 100).rounded()))%"
         }
+        glasses.onStatus = { [weak self] text in
+            guard let self, self.isStarting || self.running else { return }
+            self.status = text
+        }
         glasses.onSessionIssue = { [weak self] message, fatal, needsUpdate in
             guard let self else { return }
             if needsUpdate { self.needsGlassesAppUpdate = true }
@@ -257,6 +273,7 @@ final class AppModel {
         switch state {
         case .registered:
             status = "Registered with Meta AI."
+            refreshCameraPermission()
         case .registering:
             status = "Confirm the connection in Meta AI."
         case .available:
@@ -288,11 +305,55 @@ final class AppModel {
             needsFirmwareUpdate = true
             lastError = "These glasses need a firmware update before the camera can be used."
         case .sdkUpdateRequired:
-            lastError = "This app needs a newer glasses SDK for the connected glasses."
+            lastError = "These glasses need a newer SDK than DAT 1.0.1, the newest published version."
         case .compatible, .undefined:
             break
         @unknown default:
             break
+        }
+    }
+
+    private func refreshCameraPermission() {
+        guard registrationState == .registered, !cameraAccessGranted, !cameraPermissionAttempted else { return }
+        guard permissionTask == nil, let wearables else { return }
+        let connected = wearables.devices.contains { id in
+            wearables.deviceForIdentifier(id)?.linkState == .connected
+        }
+        guard connected else { return }
+        cameraPermissionAttempted = true
+        permissionTask = Task { [weak self] in
+            await self?.promptCameraPermission()
+            self?.permissionTask = nil
+        }
+    }
+
+    private func promptCameraPermission() async {
+        guard let wearables, registrationState == .registered, !cameraAccessGranted else { return }
+        guard !running, !isStarting else { return }
+        status = "Checking camera permission…"
+        do {
+            var permission = try await wearables.checkPermissionStatus(.camera)
+            if permission != .granted {
+                guard !running, !isStarting else { return }
+                status = "Allow camera access in Meta AI…"
+                permission = try await wearables.requestPermission(.camera)
+            }
+            guard !running, !isStarting else { return }
+            if permission == .granted {
+                cameraAccessGranted = true
+                status = "Camera access granted. You can start."
+            } else {
+                lastError = "Camera access was denied in Meta AI."
+                status = "Camera access denied."
+            }
+        } catch {
+            guard !running, !isStarting else { return }
+            lastError = GlassesDeviceReport.permissionMessage(error)
+            status = "Couldn't check camera permission."
+            if let permission = error as? PermissionError {
+                if case .noDevice = permission { cameraPermissionAttempted = false }
+                if case .noDeviceWithConnection = permission { cameraPermissionAttempted = false }
+            }
         }
     }
 

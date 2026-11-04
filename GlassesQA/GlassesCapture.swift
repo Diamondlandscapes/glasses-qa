@@ -36,6 +36,7 @@ final class GlassesCapture {
     private(set) var needsGlassesAppUpdate = false
 
     var onProgress: (@MainActor (Double) -> Void)?
+    var onStatus: (@MainActor (String) -> Void)?
     var onSessionIssue: (@MainActor (_ message: String, _ fatal: Bool, _ needsAppUpdate: Bool) -> Void)?
 
     private var session: DeviceSession?
@@ -63,6 +64,7 @@ final class GlassesCapture {
     private var latestJPEG: Data?
     private var latestFrameAt: Date?
     private var lastEncoded = Date.distantPast
+    private var awaitedDevice: DeviceIdentifier?
 
     var modeLabel: String {
         switch mode {
@@ -75,7 +77,7 @@ final class GlassesCapture {
         }
     }
 
-    func prepare(wearables: any WearablesInterface) async throws -> Mode {
+    func prepare(wearables: any WearablesInterface, selector: AutoDeviceSelector) async throws -> Mode {
         stop()
         let generation = epoch
         stopped = false
@@ -83,23 +85,23 @@ final class GlassesCapture {
         sessionFailed = nil
         mode = nil
 
+        onStatus?("Checking camera permission…")
         let allowed: Bool
         do {
             allowed = try await ensureCameraPermission(wearables)
         } catch {
-            throw CaptureError.failed(error.localizedDescription)
+            throw CaptureError.failed(GlassesDeviceReport.permissionMessage(error))
         }
         guard allowed else {
             throw CaptureError.failed("Allow camera access in Meta AI, then start again.")
         }
 
-        let session: DeviceSession
-        do {
-            let selector = AutoDeviceSelector(wearables: wearables)
-            session = try wearables.createSession(deviceSelector: selector)
-        } catch {
-            throw CaptureError.failed(error.localizedDescription)
-        }
+        onStatus?("Waiting for the glasses to be ready…")
+        _ = await waitForActiveDevice(selector, seconds: 8)
+        guard !stopped else { throw CaptureError.stopped }
+
+        onStatus?("Starting the glasses session…")
+        let session = try openSession(wearables: wearables, selector: selector)
         self.session = session
 
         errorTask = Task { [weak self] in
@@ -111,6 +113,11 @@ final class GlassesCapture {
 
         do {
             try session.start()
+        } catch let error as DeviceSessionError {
+            if case .noEligibleDevice = error {
+                throw ineligibleError(wearables)
+            }
+            throw sessionError(error, wearables: wearables)
         } catch {
             throw CaptureError.failed(error.localizedDescription)
         }
@@ -198,9 +205,107 @@ final class GlassesCapture {
     private func ensureCameraPermission(_ wearables: any WearablesInterface) async throws -> Bool {
         var status = try await wearables.checkPermissionStatus(.camera)
         if status != .granted {
+            onStatus?("Allow camera access in Meta AI…")
             status = try await wearables.requestPermission(.camera)
         }
         return status == .granted
+    }
+
+    /// `AutoDeviceSelector` only becomes eligible after it hears `devicesStream()`.
+    /// Creating one and calling `createSession` in the same turn throws
+    /// `DeviceSessionError.noEligibleDevice` ("No eligible device available")
+    /// even when the glasses are already connected.
+    private func waitForActiveDevice(_ selector: AutoDeviceSelector, seconds: TimeInterval) async -> DeviceIdentifier? {
+        if let id = selector.activeDevice { return id }
+        awaitedDevice = nil
+        let watch = Task { @MainActor [weak self] in
+            for await id in selector.activeDeviceStream() {
+                if let id {
+                    self?.awaitedDevice = id
+                    return
+                }
+            }
+        }
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline && awaitedDevice == nil && !stopped {
+            if let id = selector.activeDevice {
+                awaitedDevice = id
+                break
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        watch.cancel()
+        return awaitedDevice ?? selector.activeDevice
+    }
+
+    private func openSession(
+        wearables: any WearablesInterface,
+        selector: AutoDeviceSelector
+    ) throws -> DeviceSession {
+        if selector.activeDevice != nil {
+            do {
+                return try wearables.createSession(deviceSelector: selector)
+            } catch let error as DeviceSessionError {
+                guard case .noEligibleDevice = error else {
+                    throw sessionError(error, wearables: wearables)
+                }
+            } catch {
+                throw CaptureError.failed(error.localizedDescription)
+            }
+        }
+        guard let id = preferredDeviceID(wearables) else {
+            throw ineligibleError(wearables)
+        }
+        do {
+            let specific = SpecificDeviceSelector(device: id)
+            return try wearables.createSession(deviceSelector: specific)
+        } catch let error as DeviceSessionError {
+            if case .noEligibleDevice = error {
+                throw ineligibleError(wearables)
+            }
+            throw sessionError(error, wearables: wearables)
+        } catch {
+            throw CaptureError.failed(error.localizedDescription)
+        }
+    }
+
+    private func preferredDeviceID(_ wearables: any WearablesInterface) -> DeviceIdentifier? {
+        let known = wearables.devices.compactMap { wearables.deviceForIdentifier($0) }
+        if let display = known.first(where: { $0.deviceType() == .metaRayBanDisplay && $0.linkState == .connected }) {
+            return display.identifier
+        }
+        if let connected = known.first(where: { $0.linkState == .connected }) {
+            return connected.identifier
+        }
+        return known.first?.identifier
+    }
+
+    private func sessionError(_ error: DeviceSessionError, wearables: any WearablesInterface) -> CaptureError {
+        switch error {
+        case .datAppOnTheGlassesUpdateRequired:
+            needsGlassesAppUpdate = true
+            return .failed("\(error.localizedDescription)\n\(GlassesDeviceReport.summary(wearables))")
+        case .insufficientSDKVersion:
+            return .failed("These glasses need a newer SDK than DAT 1.0.1.\n\(GlassesDeviceReport.summary(wearables))")
+        default:
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func ineligibleError(_ wearables: any WearablesInterface) -> CaptureError {
+        let report = GlassesDeviceReport.summary(wearables)
+        let known = wearables.devices.compactMap { wearables.deviceForIdentifier($0) }
+        if known.contains(where: { $0.compatibility() == .sdkUpdateRequired }) {
+            return .failed("These glasses need a newer SDK than DAT 1.0.1, the newest published version.\n\(report)")
+        }
+        if known.contains(where: { $0.compatibility() == .deviceUpdateRequired }) {
+            return .failed("These glasses need a firmware update before the camera can be used.\n\(report)")
+        }
+        if known.contains(where: { $0.hingeState == .closed || $0.donState == .doffed }) {
+            return .failed("Unfold the glasses and put them on, then start again.\n\(report)")
+        }
+        needsGlassesAppUpdate = true
+        return .failed("No eligible device for a camera session. Ray-Ban Display is supported by DAT 1.0.1. Unfold the glasses, wear them, and install the Device Access Toolkit onto the glasses from Meta AI if Developer Mode offers it.\n\(report)")
     }
 
     private func startPhotoWithRetry(on session: DeviceSession) async -> Bool {
