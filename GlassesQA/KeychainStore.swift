@@ -11,9 +11,10 @@ struct KeychainError: LocalizedError {
 
 enum KeychainStore {
     private static let service = "com.dustin.glassesqa"
-    private static let account = "openai-api-key"
+    static let grokAccount = "xai-api-key"
+    static let geminiAccount = "gemini-api-key"
 
-    static func load() -> String? {
+    static func load(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -29,7 +30,7 @@ enum KeychainStore {
         return (value?.isEmpty == false) ? value : nil
     }
 
-    static func save(_ value: String) throws {
+    static func save(_ value: String, account: String) throws {
         let data = Data(value.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -52,7 +53,7 @@ enum KeychainStore {
         }
     }
 
-    static func delete() throws {
+    static func delete(account: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

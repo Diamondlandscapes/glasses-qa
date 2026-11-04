@@ -5,64 +5,77 @@ struct SettingsView: View {
     var playSample: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var keyDraft = ""
-    @State private var revealKey = false
-    @State private var keyMessage = ""
+    @State private var grokKeyDraft = ""
+    @State private var geminiKeyDraft = ""
+    @State private var revealGrokKey = false
+    @State private var revealGeminiKey = false
+    @State private var grokKeyMessage = ""
+    @State private var geminiKeyMessage = ""
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    HStack {
-                        Group {
-                            if revealKey {
-                                TextField("sk-…", text: $keyDraft)
-                            } else {
-                                SecureField("sk-…", text: $keyDraft)
-                            }
-                        }
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-
-                        Button {
-                            revealKey.toggle()
-                        } label: {
-                            Image(systemName: revealKey ? "eye.slash" : "eye")
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(revealKey ? "Hide API key" : "Show API key")
+                    Picker("Provider", selection: $store.provider) {
+                        Text("xAI Grok").tag(VisionProvider.grok)
+                        Text("Google Gemini").tag(VisionProvider.gemini)
                     }
-
-                    Button("Save key") {
-                        saveKey()
-                    }
-                    Button("Remove key", role: .destructive) {
-                        keyDraft = ""
-                        saveKey()
-                    }
-                    if !keyMessage.isEmpty {
-                        Text(keyMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    .pickerStyle(.segmented)
+                    .onChange(of: store.provider) { _, _ in
+                        store.persistPreferences()
                     }
                 } header: {
-                    Text("OpenAI")
+                    Text("Vision provider")
                 } footer: {
-                    Text("The key stays in this iPhone's Keychain. It is not written into the app or the git repo.")
+                    Text("xAI Grok is the default. Each provider keeps its own key.")
                 }
 
+                keySection(
+                    title: "xAI API key",
+                    footer: "From console.x.ai. The key stays in this iPhone's Keychain and is not written into the app or the git repo.",
+                    draft: $grokKeyDraft,
+                    reveal: $revealGrokKey,
+                    message: grokKeyMessage,
+                    save: saveGrokKey,
+                    remove: {
+                        grokKeyDraft = ""
+                        saveGrokKey()
+                    }
+                )
+
+                keySection(
+                    title: "Gemini API key",
+                    footer: "From aistudio.google.com/apikey. The key stays in this iPhone's Keychain and is not written into the app or the git repo.",
+                    draft: $geminiKeyDraft,
+                    reveal: $revealGeminiKey,
+                    message: geminiKeyMessage,
+                    save: saveGeminiKey,
+                    remove: {
+                        geminiKeyDraft = ""
+                        saveGeminiKey()
+                    }
+                )
+
                 Section {
-                    TextField("Model", text: $store.model)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onChange(of: store.model) { _, _ in
-                            store.persistPreferences()
-                        }
+                    if store.provider == .grok {
+                        TextField("Model", text: $store.grokModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .onChange(of: store.grokModel) { _, _ in
+                                store.persistPreferences()
+                            }
+                    } else {
+                        TextField("Model", text: $store.geminiModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .onChange(of: store.geminiModel) { _, _ in
+                                store.persistPreferences()
+                            }
+                    }
                 } header: {
                     Text("Vision model")
                 } footer: {
-                    Text("Default is gpt-4o-mini. Use any model that accepts image input.")
+                    Text(modelFooter)
                 }
 
                 Section {
@@ -103,9 +116,20 @@ struct SettingsView: View {
                 }
             }
             .onAppear {
-                keyDraft = store.apiKey
-                keyMessage = store.hasAPIKey ? "A key is saved." : "No key saved yet."
+                grokKeyDraft = store.grokAPIKey
+                geminiKeyDraft = store.geminiAPIKey
+                grokKeyMessage = store.hasGrokAPIKey ? "A key is saved." : "No key saved yet."
+                geminiKeyMessage = store.hasGeminiAPIKey ? "A key is saved." : "No key saved yet."
             }
+        }
+    }
+
+    private var modelFooter: String {
+        switch store.provider {
+        case .grok:
+            return "Default is grok-4.7. It accepts images on the xAI API."
+        case .gemini:
+            return "Default is gemini-2.5-flash. The free tier allows about 10 requests a minute."
         }
     }
 
@@ -115,13 +139,68 @@ struct SettingsView: View {
         return "Normal speed"
     }
 
-    private func saveKey() {
+    private func keySection(
+        title: String,
+        footer: String,
+        draft: Binding<String>,
+        reveal: Binding<Bool>,
+        message: String,
+        save: @escaping () -> Void,
+        remove: @escaping () -> Void
+    ) -> some View {
+        Section {
+            HStack {
+                Group {
+                    if reveal.wrappedValue {
+                        TextField("Paste key", text: draft)
+                    } else {
+                        SecureField("Paste key", text: draft)
+                    }
+                }
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.body.monospaced())
+
+                Button {
+                    reveal.wrappedValue.toggle()
+                } label: {
+                    Image(systemName: reveal.wrappedValue ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(reveal.wrappedValue ? "Hide \(title)" : "Show \(title)")
+            }
+
+            Button("Save key", action: save)
+            Button("Remove key", role: .destructive, action: remove)
+            if !message.isEmpty {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(title)
+        } footer: {
+            Text(footer)
+        }
+    }
+
+    private func saveGrokKey() {
         do {
-            try store.updateAPIKey(keyDraft)
-            keyDraft = store.apiKey
-            keyMessage = store.hasAPIKey ? "Saved in the Keychain." : "Key removed."
+            try store.updateGrokAPIKey(grokKeyDraft)
+            grokKeyDraft = store.grokAPIKey
+            grokKeyMessage = store.hasGrokAPIKey ? "Saved in the Keychain." : "Key removed."
         } catch {
-            keyMessage = error.localizedDescription
+            grokKeyMessage = error.localizedDescription
+        }
+    }
+
+    private func saveGeminiKey() {
+        do {
+            try store.updateGeminiAPIKey(geminiKeyDraft)
+            geminiKeyDraft = store.geminiAPIKey
+            geminiKeyMessage = store.hasGeminiAPIKey ? "Saved in the Keychain." : "Key removed."
+        } catch {
+            geminiKeyMessage = error.localizedDescription
         }
     }
 }

@@ -29,7 +29,7 @@ struct ContentView: View {
                     photoCard
                     answerCard
                     if !model.settings.hasAPIKey {
-                        Text("Add an OpenAI API key in Settings before starting.")
+                        Text(model.settings.missingKeyHint)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

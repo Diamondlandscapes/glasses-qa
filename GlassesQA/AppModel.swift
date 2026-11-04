@@ -140,7 +140,7 @@ final class AppModel {
             return
         }
         guard settings.hasAPIKey else {
-            lastError = "Add an OpenAI API key in Settings."
+            lastError = settings.missingKeyMessage
             return
         }
         isStarting = true
@@ -315,7 +315,7 @@ final class AppModel {
     private func captureOnce() async {
         guard running else { return }
         guard settings.hasAPIKey else {
-            lastError = "Add an OpenAI API key in Settings."
+            lastError = settings.missingKeyMessage
             haltLoop(statusText: "Stopped")
             return
         }
@@ -329,11 +329,21 @@ final class AppModel {
             }
             lastPhotoAt = Date()
             status = "Reading the photo…"
-            let text = try await OpenAIVision.answer(
-                jpeg: jpeg,
-                apiKey: settings.apiKey,
-                model: settings.modelName
-            )
+            let text: String
+            switch settings.provider {
+            case .grok:
+                text = try await GrokVision.answer(
+                    jpeg: jpeg,
+                    apiKey: settings.apiKey,
+                    model: settings.modelName
+                )
+            case .gemini:
+                text = try await GeminiVision.answer(
+                    jpeg: jpeg,
+                    apiKey: settings.apiKey,
+                    model: settings.modelName
+                )
+            }
             guard running else { return }
             guard let turn = QuestionParser.parse(text) else {
                 status = "No question in this photo"
@@ -354,11 +364,15 @@ final class AppModel {
             return
         } catch CaptureError.stopped {
             return
+        } catch VisionError.rateLimited {
+            guard running else { return }
+            status = "Rate limited, skipped"
+            return
         } catch {
             guard running else { return }
             if error is VisionError {
                 lastError = error.localizedDescription
-                status = "OpenAI request failed"
+                status = settings.provider == .grok ? "Grok request failed" : "Gemini request failed"
                 log.error("vision failed: \(error.localizedDescription, privacy: .public)")
                 return
             }

@@ -2,7 +2,7 @@
 
 iPhone app for Ray-Ban Meta and Oakley Meta glasses. It registers with the Meta AI app, takes a photo every few seconds, asks a vision model to answer any question in the frame, and speaks the answer through the current audio route (the glasses, when they are the Bluetooth headset).
 
-Bundle id: `com.dustin.glassesqa`. Callback URL scheme: `glassesqa://`. The OpenAI API key is typed into the app and stored in the iPhone Keychain. It is not in this repo.
+Bundle id: `com.dustin.glassesqa`. Callback URL scheme: `glassesqa://`. API keys are typed into the app and stored in the iPhone Keychain. They are not in this repo.
 
 The glasses SDK is [Meta Wearables Device Access Toolkit](https://github.com/facebook/meta-wearables-dat-ios) **1.0.1** (`MWDATCore` and `MWDATCamera`).
 
@@ -36,12 +36,16 @@ After the first sideload, iOS shows **Settings → Privacy & Security → Develo
 
 `MetaAppID` is `0` on purpose. Developer Mode skips Wearables attestation, so you do not need a Wearables Developer Center app id for this personal build.
 
-## OpenAI API key
+## Vision provider
 
-1. Create a key at [platform.openai.com](https://platform.openai.com/api-keys) for a model that can read images. The default model is `gpt-4o-mini`.
-2. In the app, tap the gear icon.
-3. Paste the key and tap **Save key**. It is stored in the Keychain on this phone.
-4. The same screen sets the capture interval (2–10 seconds, default 4), the model name, and the speech rate. **Play a sample** checks that you can hear speech on the current route.
+Settings has a picker with two options. **xAI Grok** is the default. **Google Gemini** is the other. Each provider has its own key in the Keychain.
+
+1. For Grok, create a key at [console.x.ai](https://console.x.ai). The default model is `grok-4.7`, the current xAI chat model that accepts images. `grok-4-fast` is not on the public API.
+2. For Gemini, create a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). The default model is `gemini-2.5-flash`. The free tier allows about 10 requests a minute.
+3. In the app, tap the gear icon, paste the key for the provider you want, and tap **Save key**.
+4. The same screen sets the capture interval (2–10 seconds, default 5), the model name for the selected provider, and the speech rate. **Play a sample** checks that you can hear speech on the current route.
+
+A 429 from either provider skips that frame, shows a short status, and does not speak the error.
 
 While **Start** is running, the app takes one photo at a time. If a frame has a clear question, it speaks a one or two sentence answer and shows the photo, the question, and the answer. It stays quiet when the model says there is no question, and it does not repeat the last question it already answered.
 

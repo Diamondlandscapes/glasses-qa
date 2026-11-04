@@ -1,31 +1,6 @@
 import Foundation
 
-enum VisionError: LocalizedError {
-    case api(String)
-    case empty
-
-    var errorDescription: String? {
-        switch self {
-        case .api(let message):
-            return message
-        case .empty:
-            return "OpenAI returned an empty answer."
-        }
-    }
-}
-
-enum OpenAIVision {
-    static let prompt = """
-    Read any question visible in this image. The question may be printed, handwritten, or on a screen.
-
-    If there is a clear question, reply in exactly this form and nothing else:
-    QUESTION: <the question on one line>
-    ANSWER: <a short direct answer, 1-2 sentences>
-
-    If there is no clear question, reply with exactly:
-    NONE
-    """
-
+enum GrokVision {
     static func answer(jpeg: Data, apiKey: String, model: String) async throws -> String {
         let body = Request(
             model: model,
@@ -34,13 +9,13 @@ enum OpenAIVision {
                 Request.Message(
                     role: "user",
                     content: [
-                        .text(prompt),
+                        .text(VisionPrompt.text),
                         .image(jpeg)
                     ]
                 )
             ]
         )
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        var request = URLRequest(url: URL(string: "https://api.x.ai/v1/chat/completions")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 45
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -49,8 +24,12 @@ enum OpenAIVision {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 429 {
+            throw VisionError.rateLimited
+        }
         guard (200..<300).contains(status) else {
-            if let api = try? JSONDecoder().decode(APIErrorBody.self, from: data) {
+            if let api = try? JSONDecoder().decode(APIErrorBody.self, from: data),
+               !api.error.message.isEmpty {
                 throw VisionError.api(api.error.message)
             }
             let snippet = String(data: data.prefix(180), encoding: .utf8) ?? "HTTP \(status)"
