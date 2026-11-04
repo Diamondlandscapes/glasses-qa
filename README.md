@@ -47,7 +47,7 @@ Settings has a picker with two options. **xAI Grok** is the default. **Google Ge
 
 A 429 from either provider skips that frame, shows a short status, and does not speak the error.
 
-While **Start** is running, the next photo is taken as soon as the previous answer returns. Only one request is in flight. Question numbers already answered in this session are not spoken again, and the model is asked to return only new ones. **New test / Reset** clears that memory. Answers are spoken by xAI's Ara voice when an xAI key is saved, with the iPhone voice as a fallback. The list on screen is sorted by question number.
+While **Start** is running, the next photo is taken as soon as the previous answer returns. Only one request is in flight. The model copies every visible question number exactly as printed. A number already answered, or the same question text under a different number, is not spoken again. A gap that was never answered is spoken when it is on screen. **New test / Reset** clears that memory. The list shows any missing numbers between 1 and the highest answer. Answers use xAI's Ara voice when an xAI key is saved, with the iPhone voice as a fallback.
 
 ## Build
 

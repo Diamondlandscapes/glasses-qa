@@ -21,6 +21,7 @@ final class AppModel {
     var question = ""
     var answer = ""
     var answers: [NumberedAnswer] = []
+    var missingLabel = ""
     var voiceLabel = "System voice"
     var roundTrip: TimeInterval?
     var captureModeLabel = "Camera off"
@@ -267,6 +268,7 @@ final class AppModel {
     func resetTest() {
         sessionAnswers = [:]
         answers = []
+        missingLabel = ""
         answer = ""
         question = ""
         lastJPEG = nil
@@ -437,21 +439,53 @@ final class AppModel {
         }
     }
 
-    /// Accepts only question numbers higher than anything already answered.
+    /// Keeps a number that has not been answered yet, including gaps below the highest.
+    /// Drops a relabeled repeat when the question text matches one already stored.
     private func newAnswers(in items: [NumberedAnswer]) -> [NumberedAnswer] {
-        let highest = sessionAnswers.keys.max() ?? 0
+        let knownText = sessionAnswers.values.map(\.questionText)
         var accepted: [NumberedAnswer] = []
-        for item in items {
-            guard let number = Int(item.number), number > highest, sessionAnswers[number] == nil else { continue }
+        let ordered = items.sorted { (Int($0.number) ?? 0) < (Int($1.number) ?? 0) }
+        for item in ordered {
+            guard let number = Int(item.number), number > 0 else { continue }
+            if sessionAnswers[number] != nil { continue }
+            if matchesKnownQuestion(item.questionText, known: knownText + accepted.map(\.questionText)) {
+                continue
+            }
             sessionAnswers[number] = item
             accepted.append(item)
         }
-        return accepted.sorted { (Int($0.number) ?? 0) < (Int($1.number) ?? 0) }
+        return accepted
+    }
+
+    private func matchesKnownQuestion(_ text: String, known: [String]) -> Bool {
+        guard !QuestionParser.tokens(text).isEmpty else { return false }
+        return known.contains { QuestionParser.closelyMatches(text, $0) }
     }
 
     private func publishAnswers() {
         answers = sessionAnswers.values.sorted { (Int($0.number) ?? 0) < (Int($1.number) ?? 0) }
         answer = answers.map(QuestionParser.spokenLine).joined(separator: "\n")
+        missingLabel = Self.missingSummary(numbers: Set(sessionAnswers.keys))
+    }
+
+    static func missingSummary(numbers: Set<Int>) -> String {
+        guard let highest = numbers.max(), highest > 1 else { return "" }
+        let gaps = (1..<highest).filter { !numbers.contains($0) }
+        guard !gaps.isEmpty else { return "" }
+        var parts: [String] = []
+        var start = gaps[0]
+        var previous = gaps[0]
+        for value in gaps.dropFirst() {
+            if value == previous + 1 {
+                previous = value
+                continue
+            }
+            parts.append(start == previous ? "\(start)" : "\(start)–\(previous)")
+            start = value
+            previous = value
+        }
+        parts.append(start == previous ? "\(start)" : "\(start)–\(previous)")
+        return "Missing \(parts.joined(separator: ", "))"
     }
 
     private func runLoop() async {
@@ -496,22 +530,19 @@ final class AppModel {
             lastPhotoAt = Date()
             status = "Reading the photo…"
             let started = Date()
-            let answered = Array(sessionAnswers.keys)
             let text: String
             switch settings.provider {
             case .grok:
                 text = try await GrokVision.answer(
                     jpeg: jpeg,
                     apiKey: settings.apiKey,
-                    model: settings.modelName,
-                    answered: answered
+                    model: settings.modelName
                 )
             case .gemini:
                 text = try await GeminiVision.answer(
                     jpeg: jpeg,
                     apiKey: settings.apiKey,
-                    model: settings.modelName,
-                    answered: answered
+                    model: settings.modelName
                 )
             }
             roundTrip = Date().timeIntervalSince(started)

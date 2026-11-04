@@ -3,7 +3,7 @@ import Foundation
 struct NumberedAnswer: Equatable, Identifiable {
     var number: String
     var text: String
-    var questionShort: String = ""
+    var questionText: String = ""
     var id: String { number }
 }
 
@@ -31,8 +31,26 @@ enum QuestionParser {
         if !numbered.isEmpty {
             return AnswerSet(items: numbered)
         }
-        if isNone(text) { return nil }
-        return AnswerSet(items: [NumberedAnswer(number: "1", text: stripTrailingPeriod(text))])
+        return nil
+    }
+
+    /// Jaccard overlap of word tokens. Empty or very short text does not match.
+    static func closelyMatches(_ a: String, _ b: String) -> Bool {
+        let left = tokens(a)
+        let right = tokens(b)
+        guard left.count >= 3, right.count >= 3 else { return false }
+        let union = left.union(right).count
+        guard union > 0 else { return false }
+        return Double(left.intersection(right).count) / Double(union) >= 0.8
+    }
+
+    static func tokens(_ text: String) -> Set<String> {
+        Set(
+            normalize(text)
+                .split(separator: " ")
+                .map(String.init)
+                .filter { $0.count > 1 }
+        )
     }
 
     /// Answers whose number is new or whose text changed since the last spoken set.
@@ -95,24 +113,44 @@ enum QuestionParser {
     }
 
     private struct JSONRow: Decodable {
-        let number: Int
-        let questionShort: String?
+        let number: Int?
+        let questionText: String
         let answer: String
+        let truncated: Bool
 
         enum CodingKeys: String, CodingKey {
             case number
+            case questionText = "question_text"
             case questionShort = "question_short"
             case answer
+            case truncated
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if let value = try? container.decode(Int.self, forKey: .number), value > 0 {
+                number = value
+            } else if let raw = try? container.decode(String.self, forKey: .number),
+                      let value = Int(raw.trimmingCharacters(in: .whitespaces)), value > 0 {
+                number = value
+            } else {
+                number = nil
+            }
+            let verbatim = (try? container.decode(String.self, forKey: .questionText))
+                ?? (try? container.decode(String.self, forKey: .questionShort))
+                ?? ""
+            questionText = verbatim.trimmingCharacters(in: .whitespacesAndNewlines)
+            answer = (try? container.decode(String.self, forKey: .answer)) ?? ""
+            truncated = (try? container.decode(Bool.self, forKey: .truncated)) ?? false
         }
 
         var item: NumberedAnswer? {
+            guard let number, !truncated else { return nil }
             let body = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard number > 0, !body.isEmpty else { return nil }
-            return NumberedAnswer(
-                number: String(number),
-                text: body.hasSuffix(".") ? String(body.dropLast()) : body,
-                questionShort: questionShort?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            )
+            guard !body.isEmpty else { return nil }
+            let trimmed = body.hasSuffix(".") ? String(body.dropLast()).trimmingCharacters(in: .whitespaces) : body
+            guard !trimmed.isEmpty else { return nil }
+            return NumberedAnswer(number: String(number), text: trimmed, questionText: questionText)
         }
     }
 

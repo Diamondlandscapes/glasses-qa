@@ -1,7 +1,7 @@
 import Foundation
 
 enum GrokVision {
-    static func answer(jpeg: Data, apiKey: String, model: String, answered: [Int]) async throws -> String {
+    static func answer(jpeg: Data, apiKey: String, model: String) async throws -> String {
         let body = Request(
             model: model,
             temperature: 0,
@@ -11,7 +11,7 @@ enum GrokVision {
                 Request.Message(
                     role: "user",
                     content: [
-                        .text(VisionPrompt.text(answered: answered)),
+                        .text(VisionPrompt.text),
                         .image(jpeg)
                     ]
                 )

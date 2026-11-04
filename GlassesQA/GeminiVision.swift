@@ -18,34 +18,18 @@ enum VisionError: LocalizedError {
 }
 
 enum VisionPrompt {
-    static func text(answered: [Int]) -> String {
-        let known = answeredSummary(answered)
-        let frontier = answered.max() ?? 0
-        return """
-        Read the numbered questions visible in this photo. They may be printed, handwritten, or on a screen.
+    static let text = """
+    Transcribe EVERY numbered question that is clearly visible in this photo. Questions may be printed, handwritten, or on a screen.
 
-        Already answered question numbers: \(known).
-        The highest answered number is \(frontier).
-        Return ONLY questions that are visible and whose numbers are greater than \(frontier).
-        Do not return any number that was already answered. Do not go backwards.
+    Copy each question number EXACTLY as it is printed. Never infer, increment, or guess a number. If the number is cut off or not clearly visible, use null. If the question text is cut off at the top or bottom edge of the photo, set truncated to true.
 
-        Respond with JSON only, an array, no markdown:
-        [{"number":19,"question_short":"powerhouse of the cell","answer":"C, mitochondria"}]
+    Respond with JSON only, an array, no markdown:
+    [{"number":33,"question_text":"which organelle is the powerhouse of the cell","answer":"C, mitochondria","truncated":false}]
 
-        answer must be short and speakable. If there is a choice letter, include it, then the answer in a few words, like "C, mitochondria" or "True" or "42".
-        question_short is a few words naming the question.
-        If there are no new questions, return [].
-        """
-    }
-
-    static func answeredSummary(_ numbers: [Int]) -> String {
-        let sorted = Array(Set(numbers)).sorted()
-        guard let first = sorted.first, let last = sorted.last else { return "none" }
-        if sorted == Array(first...last) {
-            return "\(first) through \(last)"
-        }
-        return sorted.map(String.init).joined(separator: ", ")
-    }
+    question_text is the first 12 words of the question, copied verbatim.
+    answer is short and speakable. If there is a choice letter, include it, then the answer in a few words, like "C, mitochondria" or "True" or "42".
+    If no question is clearly visible, return [].
+    """
 }
 
 enum VisionHTTP {
@@ -64,7 +48,7 @@ enum VisionHTTP {
 }
 
 enum GeminiVision {
-    static func answer(jpeg: Data, apiKey: String, model: String, answered: [Int]) async throws -> String {
+    static func answer(jpeg: Data, apiKey: String, model: String) async throws -> String {
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let encodedModel = trimmedModel.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trimmedModel
         guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(encodedModel):generateContent") else {
@@ -74,7 +58,7 @@ enum GeminiVision {
         let body = Request(
             contents: [
                 Request.Content(parts: [
-                    .text(VisionPrompt.text(answered: answered)),
+                    .text(VisionPrompt.text),
                     .image(jpeg)
                 ])
             ],
