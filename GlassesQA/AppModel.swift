@@ -21,6 +21,7 @@ final class AppModel {
     var question = ""
     var answer = ""
     var answers: [NumberedAnswer] = []
+    var voiceLabel = "System voice"
     var roundTrip: TimeInterval?
     var captureModeLabel = "Camera off"
     var needsFirmwareUpdate = false
@@ -35,7 +36,8 @@ final class AppModel {
     @ObservationIgnored private var deviceTask: Task<Void, Never>?
     @ObservationIgnored private var loopTask: Task<Void, Never>?
     @ObservationIgnored private var compatibilityTokens: [DeviceIdentifier: AnyListenerToken] = [:]
-    @ObservationIgnored private var lastSpoken: [String: String] = [:]
+    @ObservationIgnored private var sessionAnswers: [Int: NumberedAnswer] = [:]
+    @ObservationIgnored private var lastJPEG: Data?
     @ObservationIgnored private var snapRequested = false
     @ObservationIgnored private var oneShot = false
     @ObservationIgnored private var consecutiveCaptureFailures = 0
@@ -257,8 +259,19 @@ final class AppModel {
         speaker.stop()
         speaker.enqueue(
             [SpeechItem(number: "sample", key: "sample", text: "This is how answers will sound.")],
-            rate: settings.speechRate
+            rate: settings.speechRate,
+            xaiKey: settings.grokAPIKey
         )
+    }
+
+    func resetTest() {
+        sessionAnswers = [:]
+        answers = []
+        answer = ""
+        question = ""
+        lastJPEG = nil
+        speaker.stop()
+        status = running ? "New test. Watching from question 1." : "New test. Previous answers cleared."
     }
 
     func updateFirmware() {
@@ -319,6 +332,9 @@ final class AppModel {
         glasses.onStatus = { [weak self] text in
             guard let self, self.isStarting || self.running else { return }
             self.status = text
+        }
+        speaker.onVoice = { [weak self] label in
+            self?.voiceLabel = label
         }
         glasses.onSessionIssue = { [weak self] message, fatal, needsUpdate in
             guard let self else { return }
@@ -421,23 +437,39 @@ final class AppModel {
         }
     }
 
+    /// Accepts only question numbers higher than anything already answered.
+    private func newAnswers(in items: [NumberedAnswer]) -> [NumberedAnswer] {
+        let highest = sessionAnswers.keys.max() ?? 0
+        var accepted: [NumberedAnswer] = []
+        for item in items {
+            guard let number = Int(item.number), number > highest, sessionAnswers[number] == nil else { continue }
+            sessionAnswers[number] = item
+            accepted.append(item)
+        }
+        return accepted.sorted { (Int($0.number) ?? 0) < (Int($1.number) ?? 0) }
+    }
+
+    private func publishAnswers() {
+        answers = sessionAnswers.values.sorted { (Int($0.number) ?? 0) < (Int($1.number) ?? 0) }
+        answer = answers.map(QuestionParser.spokenLine).joined(separator: "\n")
+    }
+
     private func runLoop() async {
         while running && !Task.isCancelled && !oneShot {
-            await captureOnce()
+            await waitForSpeechRoom()
             if !running || Task.isCancelled || oneShot { break }
-            await waitMinGap()
+            await captureOnce()
         }
     }
 
-    private func waitMinGap() async {
-        let gap = settings.minGap
-        guard gap > 0 else { return }
-        let deadline = Date().addingTimeInterval(gap)
-        while Date() < deadline {
-            if !running || Task.isCancelled || snapRequested { break }
-            try? await Task.sleep(nanoseconds: 50_000_000)
+    /// One vision request at a time. If more than three answers are waiting to be
+    /// spoken, pause capture until the queue drains to two.
+    private func waitForSpeechRoom() async {
+        guard speaker.pendingCount > 3 else { return }
+        status = "Catching up on speech…"
+        while running && !Task.isCancelled && speaker.pendingCount > 2 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
-        snapRequested = false
     }
 
     private func captureOnce() async {
@@ -455,40 +487,44 @@ final class AppModel {
             if let image = UIImage(data: jpeg) {
                 thumbnail = image
             }
+            if jpeg == lastJPEG {
+                status = "Same photo, skipped"
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                return
+            }
+            lastJPEG = jpeg
             lastPhotoAt = Date()
             status = "Reading the photo…"
             let started = Date()
+            let answered = Array(sessionAnswers.keys)
             let text: String
             switch settings.provider {
             case .grok:
                 text = try await GrokVision.answer(
                     jpeg: jpeg,
                     apiKey: settings.apiKey,
-                    model: settings.modelName
+                    model: settings.modelName,
+                    answered: answered
                 )
             case .gemini:
                 text = try await GeminiVision.answer(
                     jpeg: jpeg,
                     apiKey: settings.apiKey,
-                    model: settings.modelName
+                    model: settings.modelName,
+                    answered: answered
                 )
             }
             roundTrip = Date().timeIntervalSince(started)
             guard running else { return }
             guard let turn = QuestionParser.parse(text) else {
-                status = "No question in this photo"
+                status = "No new question"
                 return
             }
-            question = ""
-            answers = turn.items
-            answer = turn.display
-            let fresh = QuestionParser.freshItems(previous: lastSpoken, current: turn.items)
+            let fresh = newAnswers(in: turn.items)
+            publishAnswers()
             guard !fresh.isEmpty else {
-                status = "Same answers, skipped"
+                status = "No new question"
                 return
-            }
-            for item in fresh {
-                lastSpoken[item.number] = QuestionParser.normalize(item.text)
             }
             status = "Speaking"
             speaker.enqueue(
@@ -499,7 +535,8 @@ final class AppModel {
                         text: QuestionParser.spokenLine($0)
                     )
                 },
-                rate: settings.speechRate
+                rate: settings.speechRate,
+                xaiKey: settings.grokAPIKey
             )
         } catch is CancellationError {
             return

@@ -35,7 +35,8 @@ struct ContentView: View {
                     }
                     controlButton
                     snapButton
-                    Text("Min gap \(Int(model.settings.minGap)) s · \(model.captureModeLabel) · \(model.latencyLabel)")
+                    resetButton
+                    Text("\(model.voiceLabel) · \(model.captureModeLabel) · \(model.latencyLabel)")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
@@ -214,6 +215,18 @@ struct ContentView: View {
         }
         .buttonStyle(.bordered)
         .disabled(snapDisabled)
+    }
+
+    private var resetButton: some View {
+        Button {
+            model.resetTest()
+        } label: {
+            Label("New test / Reset", systemImage: "arrow.counterclockwise")
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
+        }
+        .buttonStyle(.bordered)
     }
 
     private var connectTitle: String {

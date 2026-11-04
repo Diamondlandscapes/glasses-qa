@@ -1,17 +1,17 @@
 import Foundation
 
 enum GrokVision {
-    static func answer(jpeg: Data, apiKey: String, model: String) async throws -> String {
+    static func answer(jpeg: Data, apiKey: String, model: String, answered: [Int]) async throws -> String {
         let body = Request(
             model: model,
             temperature: 0,
-            maxTokens: 220,
+            maxTokens: 500,
             reasoningEffort: reasoningEffort(for: model),
             messages: [
                 Request.Message(
                     role: "user",
                     content: [
-                        .text(VisionPrompt.text),
+                        .text(VisionPrompt.text(answered: answered)),
                         .image(jpeg)
                     ]
                 )

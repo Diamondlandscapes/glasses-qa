@@ -18,21 +18,34 @@ enum VisionError: LocalizedError {
 }
 
 enum VisionPrompt {
-    static let text = """
-    Answer every question visible in this image, in order. Questions may be printed, handwritten, or on a screen.
+    static func text(answered: [Int]) -> String {
+        let known = answeredSummary(answered)
+        let frontier = answered.max() ?? 0
+        return """
+        Read the numbered questions visible in this photo. They may be printed, handwritten, or on a screen.
 
-    For each question, one line of plain text and nothing else:
-    Question N: <the choice letter if it is multiple choice>, <the answer in a few words>
+        Already answered question numbers: \(known).
+        The highest answered number is \(frontier).
+        Return ONLY questions that are visible and whose numbers are greater than \(frontier).
+        Do not return any number that was already answered. Do not go backwards.
 
-    Examples:
-    Question 1: B, photosynthesis.
-    Question 2: True.
-    Question 3: 42.
+        Respond with JSON only, an array, no markdown:
+        [{"number":19,"question_short":"powerhouse of the cell","answer":"C, mitochondria"}]
 
-    Always include the answer itself, not only a letter. No explanations.
-    If there are no questions, reply with exactly:
-    NONE
-    """
+        answer must be short and speakable. If there is a choice letter, include it, then the answer in a few words, like "C, mitochondria" or "True" or "42".
+        question_short is a few words naming the question.
+        If there are no new questions, return [].
+        """
+    }
+
+    static func answeredSummary(_ numbers: [Int]) -> String {
+        let sorted = Array(Set(numbers)).sorted()
+        guard let first = sorted.first, let last = sorted.last else { return "none" }
+        if sorted == Array(first...last) {
+            return "\(first) through \(last)"
+        }
+        return sorted.map(String.init).joined(separator: ", ")
+    }
 }
 
 enum VisionHTTP {
@@ -51,7 +64,7 @@ enum VisionHTTP {
 }
 
 enum GeminiVision {
-    static func answer(jpeg: Data, apiKey: String, model: String) async throws -> String {
+    static func answer(jpeg: Data, apiKey: String, model: String, answered: [Int]) async throws -> String {
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let encodedModel = trimmedModel.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trimmedModel
         guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(encodedModel):generateContent") else {
@@ -61,13 +74,13 @@ enum GeminiVision {
         let body = Request(
             contents: [
                 Request.Content(parts: [
-                    .text(VisionPrompt.text),
+                    .text(VisionPrompt.text(answered: answered)),
                     .image(jpeg)
                 ])
             ],
             generationConfig: Request.GenerationConfig(
                 temperature: 0,
-                maxOutputTokens: 220,
+                maxOutputTokens: 500,
                 thinkingConfig: Request.ThinkingConfig(thinkingBudget: 0)
             )
         )

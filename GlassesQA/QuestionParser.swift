@@ -3,6 +3,7 @@ import Foundation
 struct NumberedAnswer: Equatable, Identifiable {
     var number: String
     var text: String
+    var questionShort: String = ""
     var id: String { number }
 }
 
@@ -22,6 +23,10 @@ enum QuestionParser {
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if isNone(text) { return nil }
 
+        if text.hasPrefix("[") || text.hasPrefix("{") || text.contains("\"number\"") {
+            let rows = jsonItems(text) ?? []
+            return rows.isEmpty ? nil : AnswerSet(items: unique(rows))
+        }
         let numbered = unique(numberedItems(text))
         if !numbered.isEmpty {
             return AnswerSet(items: numbered)
@@ -66,6 +71,49 @@ enum QuestionParser {
         return collapsed.trimmingCharacters(
             in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines)
         )
+    }
+
+    private static func jsonItems(_ text: String) -> [NumberedAnswer]? {
+        let data = Data(text.utf8)
+        if let rows = try? JSONDecoder().decode([JSONRow].self, from: data) {
+            return rows.compactMap(\.item)
+        }
+        if let wrapped = try? JSONDecoder().decode(JSONEnvelope.self, from: data) {
+            return wrapped.items.compactMap(\.item)
+        }
+        if let start = text.firstIndex(of: "["), let end = text.lastIndex(of: "]"), start < end {
+            let slice = Data(text[start...end].utf8)
+            if let rows = try? JSONDecoder().decode([JSONRow].self, from: slice) {
+                return rows.compactMap(\.item)
+            }
+        }
+        return nil
+    }
+
+    private struct JSONEnvelope: Decodable {
+        let items: [JSONRow]
+    }
+
+    private struct JSONRow: Decodable {
+        let number: Int
+        let questionShort: String?
+        let answer: String
+
+        enum CodingKeys: String, CodingKey {
+            case number
+            case questionShort = "question_short"
+            case answer
+        }
+
+        var item: NumberedAnswer? {
+            let body = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard number > 0, !body.isEmpty else { return nil }
+            return NumberedAnswer(
+                number: String(number),
+                text: body.hasSuffix(".") ? String(body.dropLast()) : body,
+                questionShort: questionShort?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            )
+        }
     }
 
     private static func unique(_ items: [NumberedAnswer]) -> [NumberedAnswer] {
