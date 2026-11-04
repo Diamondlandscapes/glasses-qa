@@ -41,7 +41,7 @@ final class GlassesCapture {
     private var session: DeviceSession?
     private var camera: Camera?
     private var photo: Photo?
-    private var stream: Stream?
+    private var stream: MWDATCamera.Stream?
     private var tokens: [AnyListenerToken] = []
     private var errorTask: Task<Void, Never>?
     private var epoch = 0
@@ -104,7 +104,7 @@ final class GlassesCapture {
 
         errorTask = Task { [weak self] in
             for await error in session.errorStream() {
-                await self?.handleSessionError(error, generation: generation)
+                self?.handleSessionError(error, generation: generation)
             }
         }
         await Task.yield()
@@ -426,6 +426,8 @@ final class GlassesCapture {
                 photoSetupFailed = true
             }
         case .stopping:
+            break
+        @unknown default:
             break
         }
     }

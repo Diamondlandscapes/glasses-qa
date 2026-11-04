@@ -11,7 +11,7 @@ final class SpeechSpeaker {
             try session.setCategory(
                 .playback,
                 mode: .spokenAudio,
-                options: [.allowBluetoothA2DP, .allowBluetooth]
+                options: [.allowBluetoothA2DP, .allowBluetoothHFP]
             )
             try session.setActive(true)
         } catch {

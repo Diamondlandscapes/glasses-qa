@@ -291,6 +291,8 @@ final class AppModel {
             lastError = "This app needs a newer glasses SDK for the connected glasses."
         case .compatible, .undefined:
             break
+        @unknown default:
+            break
         }
     }
 
