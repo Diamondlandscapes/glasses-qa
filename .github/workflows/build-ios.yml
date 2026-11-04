@@ -1,0 +1,98 @@
+name: Build unsigned iOS app
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          best=""
+          best_ver=""
+          shopt -s nullglob
+          for app in /Applications/Xcode_26*.app; do
+            [ -d "$app" ] || continue
+            name="$(basename "$app" .app)"
+            ver="${name#Xcode_}"
+            if [ -z "$best_ver" ] || [ "$(printf '%s\n%s\n' "$best_ver" "$ver" | sort -V | tail -1)" = "$ver" ]; then
+              best="$app"
+              best_ver="$ver"
+            fi
+          done
+          if [ -z "$best" ]; then
+            echo "No Xcode 26 install found. DAT 1.0.1 needs Xcode 26.4 or newer."
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$best"
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          export HOMEBREW_NO_INSTALL_CLEANUP=1
+          brew install xcodegen
+          xcodegen version
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Archive unsigned Release
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild archive \
+            -project GlassesQA.xcodeproj \
+            -scheme GlassesQA \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$PWD/build/GlassesQA.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            | tee build/xcodebuild.log
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="$(find build/GlassesQA.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP" ]; then
+            echo "Archive did not contain an .app"
+            find build/GlassesQA.xcarchive -maxdepth 4 -type d -name '*.app' || true
+            exit 1
+          fi
+          echo "Packaging $APP"
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          rm -f GlassesQA-unsigned.ipa
+          ditto -c -k --keepParent build/Payload GlassesQA-unsigned.ipa
+          unzip -l GlassesQA-unsigned.ipa | head -n 40
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlassesQA-unsigned-ipa
+          path: GlassesQA-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
