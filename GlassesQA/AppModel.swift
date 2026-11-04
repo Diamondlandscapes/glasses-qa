@@ -447,6 +447,7 @@ final class AppModel {
         let ordered = items.sorted { (Int($0.number) ?? 0) < (Int($1.number) ?? 0) }
         for item in ordered {
             guard let number = Int(item.number), number > 0 else { continue }
+            guard QuestionParser.isRealAnswer(item.text) else { continue }
             if sessionAnswers[number] != nil { continue }
             if matchesKnownQuestion(item.questionText, known: knownText + accepted.map(\.questionText)) {
                 continue

@@ -70,7 +70,7 @@ enum QuestionParser {
 
     static func spokenLine(_ item: NumberedAnswer) -> String {
         let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return "" }
+        guard isRealAnswer(text), Int(item.number) != nil else { return "" }
         if let last = text.last, ".!?".contains(last) {
             return "Question \(item.number): \(text)"
         }
@@ -79,6 +79,27 @@ enum QuestionParser {
 
     static func speakable(_ items: [NumberedAnswer]) -> String {
         items.map(spokenLine).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// False for a missing answer or a placeholder such as null, none, or n/a.
+    static func isRealAnswer(_ raw: String) -> Bool {
+        !isPlaceholderToken(raw)
+    }
+
+    static func isPlaceholderToken(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        let folded = normalize(trimmed)
+        let stripped = String(
+            folded.unicodeScalars.filter {
+                !CharacterSet.punctuationCharacters.contains($0) && !CharacterSet.whitespaces.contains($0)
+            }
+        )
+        let blocked: Set<String> = [
+            "null", "none", "nil", "unknown", "undefined", "na", "n/a", "n.a", "n a",
+            "not available", "no answer", "blank", "empty", "unanswered", "tbd", "missing"
+        ]
+        return blocked.contains(folded) || blocked.contains(stripped)
     }
 
     static func normalize(_ text: String) -> String {
@@ -136,20 +157,45 @@ enum QuestionParser {
             } else {
                 number = nil
             }
-            let verbatim = (try? container.decode(String.self, forKey: .questionText))
-                ?? (try? container.decode(String.self, forKey: .questionShort))
+            let verbatim = Self.lossyString(container, .questionText)
+                ?? Self.lossyString(container, .questionShort)
                 ?? ""
-            questionText = verbatim.trimmingCharacters(in: .whitespacesAndNewlines)
-            answer = (try? container.decode(String.self, forKey: .answer)) ?? ""
-            truncated = (try? container.decode(Bool.self, forKey: .truncated)) ?? false
+            questionText = QuestionParser.isPlaceholderToken(verbatim) ? "" : verbatim
+            answer = Self.lossyString(container, .answer) ?? ""
+            if (try? container.decodeNil(forKey: .truncated)) == true {
+                truncated = false
+            } else {
+                truncated = (try? container.decode(Bool.self, forKey: .truncated)) ?? false
+            }
+        }
+
+        private static func lossyString(
+            _ container: KeyedDecodingContainer<CodingKeys>,
+            _ key: CodingKeys
+        ) -> String? {
+            guard container.contains(key) else { return nil }
+            if (try? container.decodeNil(forKey: key)) == true { return nil }
+            if let value = try? container.decode(String.self, forKey: key) {
+                return value.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let value = try? container.decode(Int.self, forKey: key) {
+                return String(value)
+            }
+            if let value = try? container.decode(Double.self, forKey: key) {
+                return String(value)
+            }
+            if let value = try? container.decode(Bool.self, forKey: key) {
+                return value ? "True" : "False"
+            }
+            return nil
         }
 
         var item: NumberedAnswer? {
             guard let number, !truncated else { return nil }
             let body = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !body.isEmpty else { return nil }
+            guard QuestionParser.isRealAnswer(body) else { return nil }
             let trimmed = body.hasSuffix(".") ? String(body.dropLast()).trimmingCharacters(in: .whitespaces) : body
-            guard !trimmed.isEmpty else { return nil }
+            guard QuestionParser.isRealAnswer(trimmed) else { return nil }
             return NumberedAnswer(number: String(number), text: trimmed, questionText: questionText)
         }
     }
@@ -177,7 +223,7 @@ enum QuestionParser {
                   let textRange = Range(match.range(at: 2), in: text) else { return nil }
             let number = String(text[numberRange])
             let body = stripTrailingPeriod(String(text[textRange]))
-            guard !body.isEmpty, !isNone(body) else { return nil }
+            guard isRealAnswer(body), !isNone(body) else { return nil }
             return NumberedAnswer(number: number, text: body)
         }
     }
