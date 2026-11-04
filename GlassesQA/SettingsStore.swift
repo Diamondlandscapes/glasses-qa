@@ -27,26 +27,32 @@ final class SettingsStore {
 
     init() {
         let defaults = UserDefaults.standard
+        let storedInterval: Double
         if defaults.object(forKey: Keys.interval) != nil {
-            intervalSeconds = defaults.double(forKey: Keys.interval)
+            storedInterval = defaults.double(forKey: Keys.interval)
         } else {
-            intervalSeconds = 4
+            storedInterval = 4
         }
-        intervalSeconds = min(10, max(2, intervalSeconds.rounded()))
+        let resolvedInterval = min(10, max(2, storedInterval.rounded()))
 
         let storedModel = defaults.string(forKey: Keys.model)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        model = storedModel.isEmpty ? "gpt-4o-mini" : storedModel
+        let resolvedModel = storedModel.isEmpty ? "gpt-4o-mini" : storedModel
 
+        let storedRate: Double
         if defaults.object(forKey: Keys.rate) != nil {
-            speechRate = defaults.double(forKey: Keys.rate)
+            storedRate = defaults.double(forKey: Keys.rate)
         } else {
-            speechRate = 0.5
+            storedRate = 0.5
         }
-        speechRate = min(0.6, max(0.35, speechRate))
+        let resolvedRate = min(0.6, max(0.35, storedRate))
+        let loadedKey = KeychainStore.load() ?? ""
 
-        apiKey = KeychainStore.load() ?? ""
-        hasAPIKey = !apiKey.isEmpty
+        intervalSeconds = resolvedInterval
+        model = resolvedModel
+        speechRate = resolvedRate
+        apiKey = loadedKey
+        hasAPIKey = !loadedKey.isEmpty
     }
 
     func persistPreferences() {
