@@ -79,6 +79,33 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Screen zoom", isOn: $store.screenZoom)
+                        .onChange(of: store.screenZoom) { _, _ in
+                            store.persistPreferences()
+                        }
+                } header: {
+                    Text("Screen lock")
+                } footer: {
+                    Text("Finds the computer screen in each photo, crops to it, and sharpens the text. It keeps that crop until the screen leaves the frame. The white light on the glasses stays on; that is Meta's privacy indicator.")
+                }
+
+                Section {
+                    Stepper(value: $store.photoSpacing, in: 0...6, step: 1) {
+                        Text(spacingLabel)
+                    }
+                    .onChange(of: store.photoSpacing) { old, new in
+                        if new == 1 {
+                            store.photoSpacing = old < 1 ? 2 : 0
+                        }
+                        store.persistPreferences()
+                    }
+                } header: {
+                    Text("Photo spacing")
+                } footer: {
+                    Text("Off takes the next photo as soon as the previous answer returns. Two to six seconds leaves a pause, which uses less battery.")
+                }
+
+                Section {
                     Stepper(value: $store.minGapSeconds, in: 1...10, step: 1) {
                         Text(store.minGap == 1 ? "At least 1 second" : "At least \(Int(store.minGap)) seconds")
                     }
@@ -125,6 +152,12 @@ struct SettingsView: View {
                 geminiKeyMessage = store.hasGeminiAPIKey ? "A key is saved." : "No key saved yet."
             }
         }
+    }
+
+    private var spacingLabel: String {
+        store.captureSpacing < 2
+            ? "As soon as each answer returns"
+            : "Every \(Int(store.captureSpacing)) seconds"
     }
 
     private var modelFooter: String {

@@ -32,12 +32,16 @@ final class SettingsStore {
     private enum Keys {
         static let provider = "glassesqa.provider"
         static let minGap = "glassesqa.minGap"
+        static let screenZoom = "glassesqa.screenZoom"
+        static let photoSpacing = "glassesqa.photoSpacing"
         static let grokModel = "glassesqa.grokModel"
         static let geminiModel = "glassesqa.geminiModel"
         static let rate = "glassesqa.rate"
     }
 
     var provider: VisionProvider
+    var screenZoom: Bool
+    var photoSpacing: Double
     var minGapSeconds: Double
     var grokModel: String
     var geminiModel: String
@@ -49,6 +53,13 @@ final class SettingsStore {
 
     var minGap: TimeInterval {
         min(10, max(1, minGapSeconds.rounded()))
+    }
+
+    /// Seconds to wait after an answer before the next photo. Zero keeps the current immediate pace.
+    var captureSpacing: TimeInterval {
+        let rounded = photoSpacing.rounded()
+        if rounded < 2 { return 0 }
+        return min(6, rounded)
     }
 
     var apiKey: String {
@@ -95,6 +106,19 @@ final class SettingsStore {
         }
         let resolvedGap = min(10, max(1, storedGap.rounded()))
 
+        let resolvedZoom: Bool
+        if defaults.object(forKey: Keys.screenZoom) != nil {
+            resolvedZoom = defaults.bool(forKey: Keys.screenZoom)
+        } else {
+            resolvedZoom = true
+        }
+
+        var resolvedSpacing = defaults.object(forKey: Keys.photoSpacing) == nil
+            ? 0
+            : defaults.double(forKey: Keys.photoSpacing).rounded()
+        if resolvedSpacing > 0 && resolvedSpacing < 2 { resolvedSpacing = 2 }
+        resolvedSpacing = min(6, max(0, resolvedSpacing))
+
         let storedGrok = defaults.string(forKey: Keys.grokModel)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let resolvedGrok = (storedGrok.isEmpty || storedGrok == "grok-4.7")
@@ -121,6 +145,8 @@ final class SettingsStore {
         let loadedGemini = KeychainStore.load(account: KeychainStore.geminiAccount) ?? ""
 
         provider = resolvedProvider
+        screenZoom = resolvedZoom
+        photoSpacing = resolvedSpacing
         minGapSeconds = resolvedGap
         grokModel = resolvedGrok
         geminiModel = resolvedGemini
@@ -151,8 +177,17 @@ final class SettingsStore {
             speechRate = clampedRate
         }
 
+        var spacing = photoSpacing.rounded()
+        if spacing > 0 && spacing < 2 { spacing = 2 }
+        spacing = min(6, max(0, spacing))
+        if photoSpacing != spacing {
+            photoSpacing = spacing
+        }
+
         let defaults = UserDefaults.standard
         defaults.set(provider.rawValue, forKey: Keys.provider)
+        defaults.set(screenZoom, forKey: Keys.screenZoom)
+        defaults.set(photoSpacing, forKey: Keys.photoSpacing)
         defaults.set(minGapSeconds, forKey: Keys.minGap)
         defaults.set(grokModel, forKey: Keys.grokModel)
         defaults.set(geminiModel, forKey: Keys.geminiModel)

@@ -17,6 +17,8 @@ final class AppModel {
     private(set) var running = false
     private(set) var isStarting = false
     var thumbnail: UIImage?
+    var cropPreview: UIImage?
+    var screenLocked = false
     var lastPhotoAt: Date?
     var question = ""
     var answer = ""
@@ -29,6 +31,7 @@ final class AppModel {
     var needsGlassesAppUpdate = false
 
     @ObservationIgnored private let glasses = GlassesCapture()
+    @ObservationIgnored private let screenLock = ScreenLock()
     @ObservationIgnored private let speaker = SpeechSpeaker()
     @ObservationIgnored private let wearables: (any WearablesInterface)?
     @ObservationIgnored private let deviceSelector: AutoDeviceSelector?
@@ -494,7 +497,35 @@ final class AppModel {
             await waitForSpeechRoom()
             if !running || Task.isCancelled || oneShot { break }
             await captureOnce()
+            if !running || Task.isCancelled || oneShot { break }
+            await waitPhotoSpacing()
         }
+    }
+
+    private func waitPhotoSpacing() async {
+        let spacing = settings.captureSpacing
+        guard spacing >= 2 else { return }
+        let deadline = Date().addingTimeInterval(spacing)
+        while Date() < deadline {
+            if !running || Task.isCancelled || snapRequested { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        snapRequested = false
+    }
+
+    private func preparedPhoto(_ image: UIImage?, fallback: Data) -> Data {
+        guard settings.screenZoom, let image else {
+            cropPreview = nil
+            screenLocked = false
+            if let image, let smaller = ImageEncoder.jpeg(from: image, maxSide: 1280, quality: 0.72) {
+                return smaller
+            }
+            return fallback
+        }
+        let locked = screenLock.process(image)
+        cropPreview = locked.preview
+        screenLocked = locked.locked
+        return locked.jpeg.isEmpty ? fallback : locked.jpeg
     }
 
     /// One vision request at a time. If more than three answers are waiting to be
@@ -519,15 +550,17 @@ final class AppModel {
             let jpeg = try await glasses.nextJPEG()
             guard running else { return }
             consecutiveCaptureFailures = 0
-            if let image = UIImage(data: jpeg) {
-                thumbnail = image
+            let source = UIImage(data: jpeg)
+            if let source {
+                thumbnail = ImageEncoder.displayImage(from: source)
             }
-            if jpeg == lastJPEG {
+            let payload = preparedPhoto(source, fallback: jpeg)
+            if payload == lastJPEG {
                 status = "Same photo, skipped"
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 return
             }
-            lastJPEG = jpeg
+            lastJPEG = payload
             lastPhotoAt = Date()
             status = "Reading the photo…"
             let started = Date()
@@ -535,13 +568,13 @@ final class AppModel {
             switch settings.provider {
             case .grok:
                 text = try await GrokVision.answer(
-                    jpeg: jpeg,
+                    jpeg: payload,
                     apiKey: settings.apiKey,
                     model: settings.modelName
                 )
             case .gemini:
                 text = try await GeminiVision.answer(
-                    jpeg: jpeg,
+                    jpeg: payload,
                     apiKey: settings.apiKey,
                     model: settings.modelName
                 )

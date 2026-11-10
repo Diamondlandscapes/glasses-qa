@@ -21,4 +21,18 @@ enum ImageEncoder {
         }
         return rendered.jpegData(compressionQuality: quality)
     }
+
+    static func displayImage(from image: UIImage, maxSide: CGFloat = 900) -> UIImage {
+        let size = image.size
+        guard size.width > 1, size.height > 1 else { return image }
+        let longest = max(size.width, size.height)
+        let scale = min(1, maxSide / longest)
+        let target = CGSize(width: floor(size.width * scale), height: floor(size.height * scale))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
 }

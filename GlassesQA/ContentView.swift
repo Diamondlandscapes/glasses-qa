@@ -131,6 +131,9 @@ struct ContentView: View {
                     .frame(maxHeight: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .accessibilityLabel("Last photo from the glasses")
+                if model.settings.screenZoom {
+                    screenPreview
+                }
             } else {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.black.opacity(0.35))
@@ -151,6 +154,30 @@ struct ContentView: View {
         }
         .padding(16)
         .background(card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var screenPreview: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if let cropPreview = model.cropPreview, model.screenLocked {
+                Image(uiImage: cropPreview)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 112, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityLabel("Cropped screen")
+                Text("Screen locked")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Image(systemName: "rectangle.dashed")
+                    .foregroundStyle(.secondary)
+                Text("No screen found. Using the full photo.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     private var answerCard: some View {

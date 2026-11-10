@@ -444,7 +444,7 @@ final class GlassesCapture {
         pendingJPEG = nil
         pendingError = nil
         awaitingPhoto = true
-        photo.capturePhoto(resolution: .large, quality: .medium)
+        photo.capturePhoto(resolution: .full, quality: .high)
 
         let deadline = Date().addingTimeInterval(25)
         while pendingJPEG == nil && pendingError == nil {
@@ -539,11 +539,11 @@ final class GlassesCapture {
 
     private func handlePhotoData(_ bytes: Data) {
         guard awaitingPhoto else { return }
-        guard let jpeg = ImageEncoder.jpeg(from: bytes) else {
+        guard UIImage(data: bytes) != nil else {
             pendingError = "Couldn't read the photo from the glasses."
             return
         }
-        pendingJPEG = jpeg
+        pendingJPEG = bytes
     }
 
     private func handleProgress(_ fraction: Double) {
