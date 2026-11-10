@@ -138,12 +138,12 @@ final class ScreenLock {
                 y: extent.origin.y + point.y * extent.height
             )
         }
-        let filter = CIFilter.perspectiveCorrection()
-        filter.inputImage = ciImage
-        filter.topLeft = denormalize(quad.topLeft)
-        filter.topRight = denormalize(quad.topRight)
-        filter.bottomLeft = denormalize(quad.bottomLeft)
-        filter.bottomRight = denormalize(quad.bottomRight)
+        guard let filter = CIFilter(name: "CIPerspectiveCorrection") else { return nil }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgPoint: denormalize(quad.topLeft)), forKey: "inputTopLeft")
+        filter.setValue(CIVector(cgPoint: denormalize(quad.topRight)), forKey: "inputTopRight")
+        filter.setValue(CIVector(cgPoint: denormalize(quad.bottomLeft)), forKey: "inputBottomLeft")
+        filter.setValue(CIVector(cgPoint: denormalize(quad.bottomRight)), forKey: "inputBottomRight")
         guard var output = filter.outputImage, output.extent.width > 20, output.extent.height > 20 else {
             return nil
         }
