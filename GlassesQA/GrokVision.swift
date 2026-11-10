@@ -5,7 +5,7 @@ enum GrokVision {
         let body = Request(
             model: model,
             temperature: 0,
-            maxTokens: 500,
+            maxTokens: 1500,
             reasoningEffort: reasoningEffort(for: model),
             messages: [
                 Request.Message(

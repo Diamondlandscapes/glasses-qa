@@ -19,16 +19,20 @@ enum VisionError: LocalizedError {
 
 enum VisionPrompt {
     static let text = """
-    Transcribe EVERY numbered question that is clearly visible in this photo. Questions may be printed, handwritten, or on a screen.
+    This photo shows a test or quiz. For every numbered question you can read, work in this order and keep the reasoning private. Do not include the reasoning in the output.
 
-    Copy each question number EXACTLY as it is printed. Never infer, increment, or guess a number. If the number is cut off or not clearly visible, use null. If the question text is cut off at the top or bottom edge of the photo, set truncated to true.
+    1. Copy the question number exactly as printed. Never infer, increment, or guess a number. If it is not clearly visible, use null.
+    2. Transcribe the full question verbatim into question_text.
+    3. Transcribe every answer choice verbatim into choices, including the letters. If there are no choices, use an empty string.
+    4. Decide the correct choice.
+    5. Set answer to the choice letter plus the choice text, such as "C, mitochondria". If there are no choices, set answer to a short factual answer.
 
-    Respond with JSON only, an array, no markdown:
-    [{"number":33,"question_text":"which organelle is the powerhouse of the cell","answer":"C, mitochondria","truncated":false}]
+    If the question or any choice is cut off or unreadable, set truncated or unreadable to true and set answer to null. Do not guess.
 
-    question_text is the first 12 words of the question, copied verbatim.
-    answer is short and speakable. If there is a choice letter, include it, then the answer in a few words, like "C, mitochondria" or "True" or "42".
-    If no question is clearly visible, return [].
+    Return JSON only, no markdown:
+    [{"number":12,"question_text":"Which organelle is the powerhouse of the cell?","choices":"A) nucleus B) ribosome C) mitochondria","answer":"C, mitochondria","truncated":false,"unreadable":false}]
+
+    If nothing readable is visible, return [].
     """
 }
 
@@ -64,7 +68,7 @@ enum GeminiVision {
             ],
             generationConfig: Request.GenerationConfig(
                 temperature: 0,
-                maxOutputTokens: 500,
+                maxOutputTokens: 1500,
                 thinkingConfig: Request.ThinkingConfig(thinkingBudget: 0)
             )
         )

@@ -23,7 +23,7 @@ enum ImageEncoder {
     }
 
     /// JPEG small enough for the vision APIs. Shrinks further if the first pass is still heavy.
-    static func payload(from image: UIImage, maxSide: CGFloat = 1024, maxBytes: Int = 700_000) -> Data? {
+    static func payload(from image: UIImage, maxSide: CGFloat = 1536, maxBytes: Int = 1_400_000) -> Data? {
         let qualities: [CGFloat] = [0.6, 0.45, 0.35]
         let sides: [CGFloat] = [maxSide, 800]
         for side in sides {

@@ -24,6 +24,7 @@ final class AppModel {
     var answer = ""
     var answers: [NumberedAnswer] = []
     var missingLabel = ""
+    var unreadableLabel = ""
     var voiceLabel = "System voice"
     var roundTrip: TimeInterval?
     var timingLabel = ""
@@ -274,6 +275,7 @@ final class AppModel {
         sessionAnswers = [:]
         answers = []
         missingLabel = ""
+        unreadableLabel = ""
         answer = ""
         question = ""
         lastJPEG = nil
@@ -553,13 +555,17 @@ final class AppModel {
             noteTiming()
             guard running else { return }
             guard let turn = QuestionParser.parse(text) else {
+                unreadableLabel = ""
                 status = "No questions found. \(timingLabel)"
                 return
             }
+            noteUnreadable(turn)
             let fresh = newAnswers(in: turn.items)
             publishAnswers()
             guard !fresh.isEmpty else {
-                status = "No new question. \(timingLabel)"
+                status = turn.unreadableNumbers.isEmpty
+                    ? "No new question. \(timingLabel)"
+                    : "\(unreadableLabel). \(timingLabel)"
                 return
             }
             status = "Speaking. \(timingLabel)"
@@ -580,6 +586,12 @@ final class AppModel {
             lastError = retryMessage
             status = "\(retryMessage). \(timingLabel)"
         }
+    }
+
+    private func noteUnreadable(_ turn: AnswerSet) {
+        unreadableLabel = turn.unreadableNumbers.isEmpty
+            ? ""
+            : "Unreadable: \(turn.unreadableNumbers.joined(separator: ", "))"
     }
 
     private func noteTiming() {
@@ -653,13 +665,17 @@ final class AppModel {
             guard running else { return }
             guard let turn = QuestionParser.parse(text) else {
                 lastError = nil
+                unreadableLabel = ""
                 status = "No questions found. \(timingLabel)"
                 return
             }
+            noteUnreadable(turn)
             let fresh = newAnswers(in: turn.items)
             publishAnswers()
             guard !fresh.isEmpty else {
-                status = "No new question. \(timingLabel)"
+                status = turn.unreadableNumbers.isEmpty
+                    ? "No new question. \(timingLabel)"
+                    : "\(unreadableLabel). \(timingLabel)"
                 return
             }
             status = "Speaking. \(timingLabel)"

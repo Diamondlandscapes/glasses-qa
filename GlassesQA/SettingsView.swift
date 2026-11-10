@@ -163,7 +163,7 @@ struct SettingsView: View {
     private var modelFooter: String {
         switch store.provider {
         case .grok:
-            return "Default is grok-4.20-0309-non-reasoning, the fastest public Grok model that accepts images. It does not reason. If you switch to grok-4.7, reasoning is set to low."
+            return "Default is grok-4.7, the current xAI vision model. Reasoning is set to low so answers stay within a few seconds."
         case .gemini:
             return "Default is gemini-2.5-flash-lite. Thinking is off. The free tier allows about 10 requests a minute."
         }

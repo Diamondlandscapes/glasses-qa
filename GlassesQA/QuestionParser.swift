@@ -4,11 +4,13 @@ struct NumberedAnswer: Equatable, Identifiable {
     var number: String
     var text: String
     var questionText: String = ""
+    var choices: String = ""
     var id: String { number }
 }
 
 struct AnswerSet: Equatable {
     var items: [NumberedAnswer]
+    var unreadableNumbers: [String] = []
 
     var display: String {
         QuestionParser.speakable(items)
@@ -24,8 +26,9 @@ enum QuestionParser {
         if isNone(text) { return nil }
 
         if text.hasPrefix("[") || text.hasPrefix("{") || text.contains("\"number\"") {
-            let rows = jsonItems(text) ?? []
-            return rows.isEmpty ? nil : AnswerSet(items: unique(rows))
+            let parsed = jsonItems(text)
+            if parsed.items.isEmpty && parsed.unreadableNumbers.isEmpty { return nil }
+            return AnswerSet(items: unique(parsed.items), unreadableNumbers: parsed.unreadableNumbers)
         }
         let numbered = unique(numberedItems(text))
         if !numbered.isEmpty {
@@ -112,21 +115,29 @@ enum QuestionParser {
         )
     }
 
-    private static func jsonItems(_ text: String) -> [NumberedAnswer]? {
-        let data = Data(text.utf8)
-        if let rows = try? JSONDecoder().decode([JSONRow].self, from: data) {
-            return rows.compactMap(\.item)
-        }
-        if let wrapped = try? JSONDecoder().decode(JSONEnvelope.self, from: data) {
-            return wrapped.items.compactMap(\.item)
-        }
-        if let start = text.firstIndex(of: "["), let end = text.lastIndex(of: "]"), start < end {
-            let slice = Data(text[start...end].utf8)
-            if let rows = try? JSONDecoder().decode([JSONRow].self, from: slice) {
-                return rows.compactMap(\.item)
+    private static func jsonItems(_ text: String) -> (items: [NumberedAnswer], unreadableNumbers: [String]) {
+        let rows = decodeRows(text)
+        var items: [NumberedAnswer] = []
+        var unreadable: [String] = []
+        for row in rows {
+            if let item = row.item {
+                items.append(item)
+            } else if let number = row.unreadableNumber {
+                unreadable.append(number)
             }
         }
-        return nil
+        return (items, unreadable)
+    }
+
+    private static func decodeRows(_ text: String) -> [JSONRow] {
+        let data = Data(text.utf8)
+        if let rows = try? JSONDecoder().decode([JSONRow].self, from: data) { return rows }
+        if let wrapped = try? JSONDecoder().decode(JSONEnvelope.self, from: data) { return wrapped.items }
+        if let start = text.firstIndex(of: "["), let end = text.lastIndex(of: "]"), start < end {
+            let slice = Data(text[start...end].utf8)
+            if let rows = try? JSONDecoder().decode([JSONRow].self, from: slice) { return rows }
+        }
+        return []
     }
 
     private struct JSONEnvelope: Decodable {
@@ -136,15 +147,19 @@ enum QuestionParser {
     private struct JSONRow: Decodable {
         let number: Int?
         let questionText: String
+        let choices: String
         let answer: String
         let truncated: Bool
+        let unreadable: Bool
 
         enum CodingKeys: String, CodingKey {
             case number
             case questionText = "question_text"
             case questionShort = "question_short"
+            case choices
             case answer
             case truncated
+            case unreadable
         }
 
         init(from decoder: Decoder) throws {
@@ -161,12 +176,19 @@ enum QuestionParser {
                 ?? Self.lossyString(container, .questionShort)
                 ?? ""
             questionText = QuestionParser.isPlaceholderToken(verbatim) ? "" : verbatim
+            choices = Self.lossyString(container, .choices) ?? ""
             answer = Self.lossyString(container, .answer) ?? ""
-            if (try? container.decodeNil(forKey: .truncated)) == true {
-                truncated = false
-            } else {
-                truncated = (try? container.decode(Bool.self, forKey: .truncated)) ?? false
-            }
+            truncated = Self.flag(container, .truncated)
+            unreadable = Self.flag(container, .unreadable)
+        }
+
+        private static func flag(
+            _ container: KeyedDecodingContainer<CodingKeys>,
+            _ key: CodingKeys
+        ) -> Bool {
+            guard container.contains(key) else { return false }
+            if (try? container.decodeNil(forKey: key)) == true { return false }
+            return (try? container.decode(Bool.self, forKey: key)) ?? false
         }
 
         private static func lossyString(
@@ -190,13 +212,23 @@ enum QuestionParser {
             return nil
         }
 
+        var unreadableNumber: String? {
+            guard let number else { return nil }
+            if truncated || unreadable || !QuestionParser.isRealAnswer(answer) { return String(number) }
+            return nil
+        }
+
         var item: NumberedAnswer? {
-            guard let number, !truncated else { return nil }
+            guard let number, unreadableNumber == nil else { return nil }
             let body = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard QuestionParser.isRealAnswer(body) else { return nil }
             let trimmed = body.hasSuffix(".") ? String(body.dropLast()).trimmingCharacters(in: .whitespaces) : body
             guard QuestionParser.isRealAnswer(trimmed) else { return nil }
-            return NumberedAnswer(number: String(number), text: trimmed, questionText: questionText)
+            return NumberedAnswer(
+                number: String(number),
+                text: trimmed,
+                questionText: questionText,
+                choices: choices
+            )
         }
     }
 

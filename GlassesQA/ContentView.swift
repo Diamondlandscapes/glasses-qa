@@ -197,9 +197,31 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(model.answers) { item in
-                    Text(QuestionParser.spokenLine(item))
-                        .font(.title3)
-                        .textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(QuestionParser.spokenLine(item))
+                            .font(.title3)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !item.questionText.isEmpty {
+                            Text(item.questionText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if !item.choices.isEmpty {
+                            Text(item.choices)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                if !model.unreadableLabel.isEmpty {
+                    Text(model.unreadableLabel)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if !model.missingLabel.isEmpty {

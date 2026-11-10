@@ -19,7 +19,7 @@ enum VisionProvider: String, CaseIterable, Identifiable {
     var defaultModel: String {
         switch self {
         case .grok:
-            return "grok-4.20-0309-non-reasoning"
+            return "grok-4.7"
         case .gemini:
             return "gemini-2.5-flash-lite"
         }
@@ -121,7 +121,7 @@ final class SettingsStore {
 
         let storedGrok = defaults.string(forKey: Keys.grokModel)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let resolvedGrok = (storedGrok.isEmpty || storedGrok == "grok-4.7")
+        let resolvedGrok = (storedGrok.isEmpty || storedGrok == "grok-4.20-0309-non-reasoning")
             ? VisionProvider.grok.defaultModel
             : storedGrok
 
