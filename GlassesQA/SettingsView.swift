@@ -86,7 +86,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Screen lock")
                 } footer: {
-                    Text("Finds the computer screen in each photo, crops to it, and sharpens the text. It keeps that crop until the screen leaves the frame. The white light on the glasses stays on; that is Meta's privacy indicator.")
+                    Text("Off until you turn it on. When on, each photo is cropped to the screen and sharpened, then sent as a small JPEG. If that crop finds nothing, the full photo is sent instead. The white light on the glasses stays on.")
                 }
 
                 Section {

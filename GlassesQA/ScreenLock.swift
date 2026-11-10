@@ -32,8 +32,9 @@ final class ScreenLock {
     private var misses = 0
 
     func process(_ image: UIImage) -> ScreenLockResult {
-        let full = ImageEncoder.jpeg(from: image, maxSide: 1280, quality: 0.72) ?? Data()
-        let probe = ImageEncoder.displayImage(from: image, maxSide: 960)
+        let working = ImageEncoder.displayImage(from: image, maxSide: 1280)
+        let full = ImageEncoder.payload(from: working) ?? Data()
+        let probe = ImageEncoder.displayImage(from: working, maxSide: 960)
         guard let cgImage = probe.cgImage else {
             return ScreenLockResult(jpeg: full, preview: nil, locked: false)
         }
@@ -42,12 +43,12 @@ final class ScreenLock {
         if let current = locked {
             if stillThere(cgImage: cgImage, orientation: orientation, quad: current) {
                 misses = 0
-                if let cropped = render(image, quad: current) {
+                if let cropped = render(working, quad: current) {
                     return cropped
                 }
             } else {
                 misses += 1
-                if misses < 2, let cropped = render(image, quad: current) {
+                if misses < 2, let cropped = render(working, quad: current) {
                     return cropped
                 }
                 locked = nil
@@ -56,7 +57,7 @@ final class ScreenLock {
         }
 
         if let found = detect(cgImage: cgImage, orientation: orientation),
-           let cropped = render(image, quad: found) {
+           let cropped = render(working, quad: found) {
             locked = found
             misses = 0
             return cropped
@@ -148,17 +149,17 @@ final class ScreenLock {
             return nil
         }
         let longest = max(output.extent.width, output.extent.height)
-        let scale = min(2.4, max(1, 1700 / longest))
-        if scale > 1.01 {
+        let scale = min(1.6, max(1, 1024 / longest))
+        if abs(scale - 1) > 0.02 {
             output = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
         output = output.applyingFilter("CIUnsharpMask", parameters: [
-            kCIInputRadiusKey: 1.3,
-            kCIInputIntensityKey: 0.65
+            kCIInputRadiusKey: 1.1,
+            kCIInputIntensityKey: 0.5
         ])
         guard let cg = context.createCGImage(output, from: output.extent) else { return nil }
         let sharpened = UIImage(cgImage: cg)
-        guard let jpeg = sharpened.jpegData(compressionQuality: 0.78) else { return nil }
+        guard let jpeg = ImageEncoder.payload(from: sharpened) else { return nil }
         return ScreenLockResult(
             jpeg: jpeg,
             preview: ImageEncoder.displayImage(from: sharpened, maxSide: 360),

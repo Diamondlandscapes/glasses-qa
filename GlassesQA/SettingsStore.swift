@@ -32,7 +32,7 @@ final class SettingsStore {
     private enum Keys {
         static let provider = "glassesqa.provider"
         static let minGap = "glassesqa.minGap"
-        static let screenZoom = "glassesqa.screenZoom"
+        static let screenZoom = "glassesqa.screenZoom.v2"
         static let photoSpacing = "glassesqa.photoSpacing"
         static let grokModel = "glassesqa.grokModel"
         static let geminiModel = "glassesqa.geminiModel"
@@ -110,7 +110,7 @@ final class SettingsStore {
         if defaults.object(forKey: Keys.screenZoom) != nil {
             resolvedZoom = defaults.bool(forKey: Keys.screenZoom)
         } else {
-            resolvedZoom = true
+            resolvedZoom = false
         }
 
         var resolvedSpacing = defaults.object(forKey: Keys.photoSpacing) == nil

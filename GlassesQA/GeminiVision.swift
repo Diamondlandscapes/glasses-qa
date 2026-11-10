@@ -81,12 +81,13 @@ enum GeminiVision {
             throw VisionError.rateLimited
         }
         guard (200..<300).contains(status) else {
-            if let api = try? JSONDecoder().decode(APIErrorBody.self, from: data),
-               !api.error.message.isEmpty {
-                throw VisionError.api(api.error.message)
+            let message = (try? JSONDecoder().decode(APIErrorBody.self, from: data))?.error.message
+                .replacingOccurrences(of: "\n", with: " ") ?? ""
+            if message.isEmpty {
+                throw VisionError.api("API error \(status)")
             }
-            let snippet = String(data: data.prefix(180), encoding: .utf8) ?? "HTTP \(status)"
-            throw VisionError.api(snippet)
+            let clipped = message.count > 80 ? String(message.prefix(80)) : message
+            throw VisionError.api("API error \(status): \(clipped)")
         }
 
         let decoded = try JSONDecoder().decode(Response.self, from: data)

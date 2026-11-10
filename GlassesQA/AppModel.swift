@@ -26,6 +26,7 @@ final class AppModel {
     var missingLabel = ""
     var voiceLabel = "System voice"
     var roundTrip: TimeInterval?
+    var timingLabel = ""
     var captureModeLabel = "Camera off"
     var needsFirmwareUpdate = false
     var needsGlassesAppUpdate = false
@@ -42,6 +43,7 @@ final class AppModel {
     @ObservationIgnored private var compatibilityTokens: [DeviceIdentifier: AnyListenerToken] = [:]
     @ObservationIgnored private var sessionAnswers: [Int: NumberedAnswer] = [:]
     @ObservationIgnored private var lastJPEG: Data?
+    @ObservationIgnored private var lastFullPayload: Data?
     @ObservationIgnored private var snapRequested = false
     @ObservationIgnored private var oneShot = false
     @ObservationIgnored private var consecutiveCaptureFailures = 0
@@ -513,19 +515,80 @@ final class AppModel {
         snapRequested = false
     }
 
-    private func preparedPhoto(_ image: UIImage?, fallback: Data) -> Data {
-        guard settings.screenZoom, let image else {
-            cropPreview = nil
-            screenLocked = false
-            if let image, let smaller = ImageEncoder.jpeg(from: image, maxSide: 1280, quality: 0.72) {
-                return smaller
-            }
-            return fallback
+    private func cappedPhoto(_ image: UIImage?, fallback: Data) -> Data {
+        guard let image, let smaller = ImageEncoder.payload(from: image) else { return fallback }
+        return smaller
+    }
+
+    private func askModel(_ jpeg: Data) async throws -> String {
+        switch settings.provider {
+        case .grok:
+            return try await GrokVision.answer(
+                jpeg: jpeg,
+                apiKey: settings.apiKey,
+                model: settings.modelName
+            )
+        case .gemini:
+            return try await GeminiVision.answer(
+                jpeg: jpeg,
+                apiKey: settings.apiKey,
+                model: settings.modelName
+            )
         }
-        let locked = screenLock.process(image)
-        cropPreview = locked.preview
-        screenLocked = locked.locked
-        return locked.jpeg.isEmpty ? fallback : locked.jpeg
+    }
+
+    private func retryFullPhoto(after error: Error) async {
+        let message = error.localizedDescription
+        lastError = message
+        status = "\(message). Trying the full photo"
+        guard let source = lastFullPayload else {
+            noteTiming()
+            status = "\(message). \(timingLabel)"
+            return
+        }
+        do {
+            let started = Date()
+            let text = try await askModel(source)
+            roundTrip = (roundTrip ?? 0) + Date().timeIntervalSince(started)
+            noteTiming()
+            guard running else { return }
+            guard let turn = QuestionParser.parse(text) else {
+                status = "No questions found. \(timingLabel)"
+                return
+            }
+            let fresh = newAnswers(in: turn.items)
+            publishAnswers()
+            guard !fresh.isEmpty else {
+                status = "No new question. \(timingLabel)"
+                return
+            }
+            status = "Speaking. \(timingLabel)"
+            speaker.enqueue(
+                fresh.map {
+                    SpeechItem(
+                        number: $0.number,
+                        key: QuestionParser.normalize($0.text),
+                        text: QuestionParser.spokenLine($0)
+                    )
+                },
+                rate: settings.speechRate,
+                xaiKey: settings.grokAPIKey
+            )
+        } catch {
+            noteTiming()
+            let retryMessage = error.localizedDescription
+            lastError = retryMessage
+            status = "\(retryMessage). \(timingLabel)"
+        }
+    }
+
+    private func noteTiming() {
+        timingLabel = String(
+            format: "Capture %.1fs · Transfer %.1fs · Model %.1fs",
+            glasses.lastCaptureSeconds,
+            glasses.lastTransferSeconds,
+            roundTrip ?? 0
+        )
     }
 
     /// One vision request at a time. If more than three answers are waiting to be
@@ -554,7 +617,22 @@ final class AppModel {
             if let source {
                 thumbnail = ImageEncoder.displayImage(from: source)
             }
-            let payload = preparedPhoto(source, fallback: jpeg)
+            let fullPayload = cappedPhoto(source, fallback: jpeg)
+            lastFullPayload = fullPayload
+            var payload = fullPayload
+            var usedZoom = false
+            if settings.screenZoom, let source {
+                let locked = screenLock.process(source)
+                cropPreview = locked.preview
+                screenLocked = locked.locked
+                if locked.locked, !locked.jpeg.isEmpty {
+                    payload = locked.jpeg
+                    usedZoom = true
+                }
+            } else {
+                cropPreview = nil
+                screenLocked = false
+            }
             if payload == lastJPEG {
                 status = "Same photo, skipped"
                 try? await Task.sleep(nanoseconds: 300_000_000)
@@ -564,34 +642,27 @@ final class AppModel {
             lastPhotoAt = Date()
             status = "Reading the photo…"
             let started = Date()
-            let text: String
-            switch settings.provider {
-            case .grok:
-                text = try await GrokVision.answer(
-                    jpeg: payload,
-                    apiKey: settings.apiKey,
-                    model: settings.modelName
-                )
-            case .gemini:
-                text = try await GeminiVision.answer(
-                    jpeg: payload,
-                    apiKey: settings.apiKey,
-                    model: settings.modelName
-                )
+            var text = try await askModel(payload)
+            if usedZoom, QuestionParser.parse(text) == nil {
+                status = "No questions found in the crop. Trying the full photo"
+                screenLocked = false
+                text = try await askModel(fullPayload)
             }
             roundTrip = Date().timeIntervalSince(started)
+            noteTiming()
             guard running else { return }
             guard let turn = QuestionParser.parse(text) else {
-                status = "No new question"
+                lastError = nil
+                status = "No questions found. \(timingLabel)"
                 return
             }
             let fresh = newAnswers(in: turn.items)
             publishAnswers()
             guard !fresh.isEmpty else {
-                status = "No new question"
+                status = "No new question. \(timingLabel)"
                 return
             }
-            status = "Speaking"
+            status = "Speaking. \(timingLabel)"
             speaker.enqueue(
                 fresh.map {
                     SpeechItem(
@@ -609,14 +680,22 @@ final class AppModel {
             return
         } catch VisionError.rateLimited {
             guard running else { return }
-            status = "Rate limited, skipped"
+            noteTiming()
+            lastError = "Rate limited"
+            status = "Rate limited, skipped. \(timingLabel)"
             return
         } catch {
             guard running else { return }
+            if error is VisionError, settings.screenZoom, screenLocked {
+                await retryFullPhoto(after: error)
+                return
+            }
             if error is VisionError {
-                lastError = error.localizedDescription
-                status = settings.provider == .grok ? "Grok request failed" : "Gemini request failed"
-                log.error("vision failed: \(error.localizedDescription, privacy: .public)")
+                noteTiming()
+                let message = error.localizedDescription
+                lastError = message
+                status = "\(message). \(timingLabel)"
+                log.error("vision failed: \(message, privacy: .public)")
                 return
             }
             consecutiveCaptureFailures += 1

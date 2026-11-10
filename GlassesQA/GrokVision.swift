@@ -30,12 +30,7 @@ enum GrokVision {
             throw VisionError.rateLimited
         }
         guard (200..<300).contains(status) else {
-            if let api = try? JSONDecoder().decode(APIErrorBody.self, from: data),
-               !api.error.message.isEmpty {
-                throw VisionError.api(api.error.message)
-            }
-            let snippet = String(data: data.prefix(180), encoding: .utf8) ?? "HTTP \(status)"
-            throw VisionError.api(snippet)
+            throw VisionError.api(Self.failureText(status: status, data: data))
         }
 
         let decoded = try JSONDecoder().decode(Response.self, from: data)
@@ -59,6 +54,17 @@ enum GrokVision {
             return "none"
         }
         return nil
+    }
+
+    private static func failureText(status: Int, data: Data) -> String {
+        if let api = try? JSONDecoder().decode(APIErrorBody.self, from: data) {
+            let message = api.error.message.replacingOccurrences(of: "\n", with: " ")
+            if !message.isEmpty {
+                let clipped = message.count > 80 ? String(message.prefix(80)) : message
+                return "API error \(status): \(clipped)"
+            }
+        }
+        return "API error \(status)"
     }
 }
 

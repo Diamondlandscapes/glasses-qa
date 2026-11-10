@@ -84,6 +84,12 @@ struct ContentView: View {
             Text(model.status)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
+            if !model.timingLabel.isEmpty {
+                Text(model.timingLabel)
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if model.registrationState != .registered {
                 Text("Meta AI opens so you can approve this app. Developer Mode has to be on for the glasses.")

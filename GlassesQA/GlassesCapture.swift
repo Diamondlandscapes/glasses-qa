@@ -438,13 +438,19 @@ final class GlassesCapture {
         return false
     }
 
+    private(set) var lastCaptureSeconds: TimeInterval = 0
+    private(set) var lastTransferSeconds: TimeInterval = 0
+    private var transferStartedAt: Date?
+
     private func capturePhotoJPEG() async throws -> Data {
         guard !stopped else { throw CaptureError.stopped }
         guard photoState == .started, let photo else { throw CaptureError.notReady }
         pendingJPEG = nil
         pendingError = nil
         awaitingPhoto = true
-        photo.capturePhoto(resolution: .full, quality: .high)
+        transferStartedAt = nil
+        let requestedAt = Date()
+        photo.capturePhoto(resolution: .large, quality: .medium)
 
         let deadline = Date().addingTimeInterval(25)
         while pendingJPEG == nil && pendingError == nil {
@@ -459,7 +465,17 @@ final class GlassesCapture {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         awaitingPhoto = false
-        if let pendingJPEG { return pendingJPEG }
+        if let pendingJPEG {
+            let arrivedAt = Date()
+            if let transferStartedAt {
+                lastCaptureSeconds = max(0, transferStartedAt.timeIntervalSince(requestedAt))
+                lastTransferSeconds = max(0, arrivedAt.timeIntervalSince(transferStartedAt))
+            } else {
+                lastCaptureSeconds = 0
+                lastTransferSeconds = max(0, arrivedAt.timeIntervalSince(requestedAt))
+            }
+            return pendingJPEG
+        }
         throw CaptureError.failed(pendingError ?? "The photo didn't arrive.")
     }
 
@@ -548,6 +564,9 @@ final class GlassesCapture {
 
     private func handleProgress(_ fraction: Double) {
         guard awaitingPhoto else { return }
+        if transferStartedAt == nil {
+            transferStartedAt = Date()
+        }
         onProgress?(fraction)
     }
 

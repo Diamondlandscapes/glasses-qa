@@ -22,6 +22,19 @@ enum ImageEncoder {
         return rendered.jpegData(compressionQuality: quality)
     }
 
+    /// JPEG small enough for the vision APIs. Shrinks further if the first pass is still heavy.
+    static func payload(from image: UIImage, maxSide: CGFloat = 1024, maxBytes: Int = 700_000) -> Data? {
+        let qualities: [CGFloat] = [0.6, 0.45, 0.35]
+        let sides: [CGFloat] = [maxSide, 800]
+        for side in sides {
+            for quality in qualities {
+                guard let data = jpeg(from: image, maxSide: side, quality: quality) else { continue }
+                if data.count <= maxBytes { return data }
+            }
+        }
+        return jpeg(from: image, maxSide: 640, quality: 0.35)
+    }
+
     static func displayImage(from image: UIImage, maxSide: CGFloat = 900) -> UIImage {
         let size = image.size
         guard size.width > 1, size.height > 1 else { return image }
